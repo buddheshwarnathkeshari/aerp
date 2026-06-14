@@ -164,3 +164,38 @@ class AgentReport(BaseModel):
         ge=0.0, le=1.0,
         description="Your overall confidence in this review, from 0.0 to 1.0."
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ConsensusReport — the final unified output from the Consensus Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ConsensusReport(BaseModel):
+    """
+    The unified structured output from the Consensus Agent.
+
+    It deduplicates findings from the 8 specialist agents and assigns
+    a holistic risk score based on the entire picture.
+    """
+
+    final_findings: list[CodeFinding] = Field(
+        description="Deduplicated and consolidated list of the most important findings. "
+                    "Filter out noise, combine duplicates, and resolve conflicting advice."
+    )
+
+    overall_assessment: str = Field(
+        description="A holistic summary of the PR, synthesizing input from all specialist agents. "
+                    "Highlight the most critical areas of concern."
+    )
+
+    recommendation: Recommendation = Field(
+        description="The final unified recommendation for this PR (approve, approve_with_comments, etc.)."
+    )
+
+    risk_score: int = Field(
+        ge=0, le=100,
+        description="Overall risk score from 0 to 100. "
+                    "0 = perfectly safe, no issues. "
+                    "100 = absolutely critical, must not be deployed. "
+                    "Calculate this intelligently based on the severity and impact of the final_findings."
+    )

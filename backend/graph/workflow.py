@@ -68,6 +68,8 @@ from backend.graph.nodes import (
     standards_node,
     architecture_node,
     blast_radius_node,
+    # Phase 5
+    consensus_node,
 )
 from backend.config.settings import get_settings
 
@@ -86,58 +88,39 @@ AGENT_NODES = [
 ]
 
 
-async def collector_node(state: ReviewState) -> dict:
+async def hitl_stub_node(state: ReviewState) -> dict:
     """
-    Fan-in node that runs after all parallel agents complete.
-
-    WHY IS THIS NEEDED?
-      After fanning out to 8 agents, we need a single "join" point
-      where all findings are consolidated before the workflow ends.
-      This node is where Phase 5 (Consensus Agent) will be plugged in.
-
-    For Phase 4, it just logs a summary and returns nothing new
-    (the agent_findings reducer has already merged everything).
+    Placeholder for the Phase 6 Human-in-the-Loop node.
+    For now, it just marks the review as hitl_required but passes through.
     """
-    from backend.config.settings import get_settings
+    import structlog
+    logger = structlog.get_logger()
+    logger.warning("HITL required! (Phase 6 will pause here)", review_id=state["review_id"])
+    return {"hitl_required": True}
+
+
+def route_after_consensus(state: ReviewState) -> str:
+    """
+    Conditional edge logic after the consensus agent finishes.
+    If risk_score > 40, go to HITL. Otherwise, Auto-Approve.
+    """
     import structlog
     logger = structlog.get_logger()
 
-    all_findings = state.get("agent_findings", [])
-    logger.info(
-        "All agents complete — findings collected",
-        review_id=state["review_id"],
-        total_findings=len(all_findings),
-        agents_run=len([
-            k for k in [
-                state.get("code_review_result"),
-                state.get("security_result"),
-                state.get("database_result"),
-                state.get("requirements_result"),
-                state.get("scalability_result"),
-                state.get("standards_result"),
-                state.get("architecture_result"),
-                state.get("blast_radius_result"),
-            ] if k is not None
-        ])
-    )
-    # Phase 5: Consensus Agent will run here
-    # For now, just return empty (findings are already in state via reducer)
-    return {}
+    result = state.get("consensus_result", {})
+    score = result.get("risk_score", 0)
+
+    if score > 40:
+        logger.info("Routing to HITL (High Risk)", score=score)
+        return "hitl"
+    else:
+        logger.info("Routing to END (Auto-Approve)", score=score)
+        return "end"
 
 
 def create_workflow(checkpointer=None):
     """
     Builds and compiles the AERP LangGraph workflow.
-
-    Phase 4: parallel fan-out to 8 agents, then collector fan-in.
-
-    Args:
-        checkpointer: Optional checkpointer for state persistence.
-                      Required for HITL (pause/resume).
-                      In Phase 4, we pass None (no HITL yet).
-
-    Returns:
-        A compiled LangGraph graph ready to run.
     """
     builder = StateGraph(ReviewState)
 
@@ -155,27 +138,33 @@ def create_workflow(checkpointer=None):
     builder.add_node("architecture", architecture_node)
     builder.add_node("blast_radius", blast_radius_node)
 
-    # Collector (fan-in)
-    builder.add_node("collector", collector_node)
+    # Phase 5 Consensus + Phase 6 HITL stub
+    builder.add_node("consensus", consensus_node)
+    builder.add_node("hitl", hitl_stub_node)
 
     # ── Define edges ──────────────────────────────────────────────────────────
-    # Phase 1 → 2 (sequential)
     builder.add_edge(START, "context_collector")
     builder.add_edge("context_collector", "repository_analyzer")
 
-    # Phase 4: FAN-OUT — repository_analyzer → all 8 agents simultaneously
-    # Adding parallel edges from one source node to multiple targets
-    # causes LangGraph to execute them concurrently (asyncio gather)
+    # FAN-OUT: repo_analyzer → [8 agents]
     for agent_node in AGENT_NODES:
         builder.add_edge("repository_analyzer", agent_node)
 
-    # Phase 4: FAN-IN — all 8 agents → collector
-    # Each agent's findings are merged via the Annotated[list, add] reducer
-    # collector_node runs only after ALL 8 agents have finished
+    # FAN-IN: [8 agents] → consensus
     for agent_node in AGENT_NODES:
-        builder.add_edge(agent_node, "collector")
+        builder.add_edge(agent_node, "consensus")
 
-    builder.add_edge("collector", END)
+    # Conditional Routing: consensus → hitl or END
+    builder.add_conditional_edges(
+        "consensus",
+        route_after_consensus,
+        {
+            "hitl": "hitl",
+            "end": END,
+        }
+    )
+
+    builder.add_edge("hitl", END)
 
     # ── Compile ───────────────────────────────────────────────────────────────
     graph = builder.compile(checkpointer=checkpointer)
@@ -185,7 +174,6 @@ def create_workflow(checkpointer=None):
 def get_redis_checkpointer():
     """
     Creates a Redis-backed checkpointer for HITL state persistence.
-    Used in Phase 6 when we add human-in-the-loop.
     """
     return RedisSaver.from_conn_string(settings.redis_url)
 
