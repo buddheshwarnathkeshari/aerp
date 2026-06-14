@@ -50,19 +50,30 @@ async def start_review(request: StartReviewRequest):
     review_id = str(uuid.uuid4())
     logger.info("Starting review", review_id=review_id, pr_url=request.pr_url)
 
+    provider = settings.llm_provider.lower() or "gemini"
+    if provider == "openai":
+        model = settings.openai_model
+    elif provider == "anthropic":
+        model = settings.anthropic_model
+    else:
+        provider = "gemini"
+        model = settings.gemini_model
+
     # Create the review record in the database
     conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
     conn = await asyncpg.connect(conn_string)
     try:
         await conn.execute(
             """
-            INSERT INTO reviews (id, pr_url, jira_url, doc_url, status)
-            VALUES ($1, $2, $3, $4, 'queued')
+            INSERT INTO reviews (id, pr_url, jira_url, doc_url, status, llm_provider, llm_model)
+            VALUES ($1, $2, $3, $4, 'queued', $5, $6)
             """,
             review_id,
             request.pr_url,
             request.jira_url,
             request.doc_url,
+            provider,
+            model,
         )
     finally:
         await conn.close()

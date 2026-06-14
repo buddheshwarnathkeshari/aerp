@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS reviews (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at    TIMESTAMPTZ,
-    error           TEXT
+    error           TEXT,
+    llm_provider    TEXT,
+    llm_model       TEXT
 );
 
 -- ─────────────────────────────────────────────────────────────────────────────
