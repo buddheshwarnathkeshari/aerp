@@ -16,7 +16,7 @@ langchain-community==0.3.13             # Community integrations (document loade
 langchain-google-genai==2.0.7           # Gemini LLM + embeddings
 
 # ── LangGraph — Agent orchestration ──────────────────────────────────────────
-langgraph==0.2.60                        # Graph-based workflow orchestration
+langgraph==0.3.0                        # Graph-based workflow orchestration
 langgraph-checkpoint-redis==0.0.4       # Redis checkpointer for HITL pause/resume
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ sqlalchemy[asyncio]==2.0.36             # ORM for database models
 asyncpg==0.30.0                          # Async PostgreSQL driver
 psycopg2-binary==2.9.10                 # Sync driver (needed by Alembic migrations)
 alembic==1.14.0                          # Database migrations (schema versioning)
-pgvector==0.3.6                          # pgvector Python client (vector type support)
+pgvector==0.2.5                          # pgvector Python client (vector type support)
 langchain-postgres==0.0.12              # LangChain's pgvector integration
 
 # ── Cache + Task Queue ────────────────────────────────────────────────────────

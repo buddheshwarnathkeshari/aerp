@@ -25,19 +25,13 @@ def get_embedder() -> GoogleGenerativeAIEmbeddings:
       A function: created on first call, after all settings are loaded.
     """
     return GoogleGenerativeAIEmbeddings(
-        model=settings.gemini_embedding_model,  # "models/text-embedding-004"
+        model=settings.gemini_embedding_model,
         google_api_key=settings.google_api_key,
-        task_type="retrieval_document",  # Optimized for storing documents
-        # task_type options:
-        #   "retrieval_document" → for indexing (what we store)
-        #   "retrieval_query"    → for searching (what we query with)
-        # Using different types for index vs query improves retrieval quality.
     )
 
 def get_query_embedder() -> GoogleGenerativeAIEmbeddings:
-    """Embedder optimized for query vectors (different task type)."""
+    """Embedder optimized for query vectors."""
     return GoogleGenerativeAIEmbeddings(
         model=settings.gemini_embedding_model,
         google_api_key=settings.google_api_key,
-        task_type="retrieval_query",  # Optimized for querying
     )

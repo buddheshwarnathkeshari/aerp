@@ -73,7 +73,7 @@ async def fetch_pr_data(pr_url: str) -> dict:
     # WHY get the diff? Agents need to see exactly what changed line-by-line.
     # The diff is the primary input for Code Review, Security, and DB agents.
     import httpx
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         response = await client.get(
             pr.diff_url,
             headers={"Authorization": f"token {settings.github_token}"},
