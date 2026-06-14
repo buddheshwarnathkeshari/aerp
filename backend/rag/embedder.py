@@ -9,29 +9,15 @@ RETRIEVER: given a query, find the most similar stored chunks
 """
 
 # ── embedder.py logic ─────────────────────────────────────────────────────────
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from backend.config.settings import get_settings
+from backend.utils.llm_factory import get_embedder as get_llm_embedder
+from langchain_core.embeddings import Embeddings
 
-settings = get_settings()
-
-def get_embedder() -> GoogleGenerativeAIEmbeddings:
+def get_embedder() -> Embeddings:
     """
-    Returns the Gemini embedding model.
-
-    WHY A FUNCTION INSTEAD OF MODULE-LEVEL INSTANCE?
-      Module-level: created when Python imports the module.
-      If the module is imported during testing without API keys set,
-      it crashes at import time — confusing error.
-      A function: created on first call, after all settings are loaded.
+    Returns the configured embedding model.
     """
-    return GoogleGenerativeAIEmbeddings(
-        model=settings.gemini_embedding_model,
-        google_api_key=settings.google_api_key,
-    )
+    return get_llm_embedder()
 
-def get_query_embedder() -> GoogleGenerativeAIEmbeddings:
+def get_query_embedder() -> Embeddings:
     """Embedder optimized for query vectors."""
-    return GoogleGenerativeAIEmbeddings(
-        model=settings.gemini_embedding_model,
-        google_api_key=settings.google_api_key,
-    )
+    return get_llm_embedder()

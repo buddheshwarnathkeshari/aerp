@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
     source      TEXT NOT NULL,      -- "github_pr" | "jira" | "google_doc" | "repo_file"
     content     TEXT NOT NULL,      -- The actual text chunk
     metadata    JSONB,              -- File path, page number, section, etc.
-    embedding   vector(3072),       -- The 3072-dimensional vector
+    embedding   vector,             -- Variable dimension vector
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

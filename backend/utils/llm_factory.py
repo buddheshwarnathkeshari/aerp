@@ -37,3 +37,43 @@ def get_llm(temperature=0.0) -> BaseChatModel:
             api_key=settings.google_api_key,
             temperature=temperature
         )
+
+from langchain_core.embeddings import Embeddings
+
+def get_embedder() -> Embeddings:
+    """Returns a LangChain embeddings model based on the configured LLM_PROVIDER."""
+    provider = settings.llm_provider.lower()
+    
+    if provider == "openai":
+        from langchain_openai import OpenAIEmbeddings
+        if not settings.openai_api_key:
+            import structlog
+            structlog.get_logger().warning("OPENAI_API_KEY is missing! Using mock model fallback.")
+        return OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            api_key=settings.openai_api_key
+        )
+        
+    elif provider == "anthropic":
+        # Anthropic doesn't have an embedding model natively available.
+        # Fallback to OpenAI if key is present, else Gemini.
+        if settings.openai_api_key:
+            from langchain_openai import OpenAIEmbeddings
+            return OpenAIEmbeddings(
+                model="text-embedding-3-small",
+                api_key=settings.openai_api_key
+            )
+        else:
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            return GoogleGenerativeAIEmbeddings(
+                model=settings.gemini_embedding_model,
+                google_api_key=settings.google_api_key
+            )
+            
+    else:
+        # Default to Gemini
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        return GoogleGenerativeAIEmbeddings(
+            model=settings.gemini_embedding_model,
+            google_api_key=settings.google_api_key
+        )
