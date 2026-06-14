@@ -28,6 +28,14 @@ def get_llm(temperature=0.0) -> BaseChatModel:
             api_key=settings.anthropic_api_key,
             temperature=temperature
         )
+
+    elif provider == "ollama":
+        from langchain_ollama import ChatOllama
+        return ChatOllama(
+            model=os.getenv("OLLAMA_MODEL", "llama3.1"),
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434"),
+            temperature=temperature
+        )
         
     else:
         # Default to Gemini
@@ -69,7 +77,14 @@ def get_embedder() -> Embeddings:
                 model=settings.gemini_embedding_model,
                 google_api_key=settings.google_api_key
             )
-            
+
+    elif provider == "ollama":
+        from langchain_ollama import OllamaEmbeddings
+        return OllamaEmbeddings(
+            model=os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text"),
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+        )
+
     else:
         # Default to Gemini
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
