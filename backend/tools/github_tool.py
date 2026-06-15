@@ -62,6 +62,21 @@ async def fetch_pr_data(pr_url: str) -> dict:
     owner, repo_name, pr_number = parse_pr_url(pr_url)
     logger.info("Fetching PR from GitHub", owner=owner, repo=repo_name, pr=pr_number)
 
+    if owner == "fake":
+        return {
+            "pr_number": pr_number,
+            "title": "Mock PR for Testing",
+            "description": "This is a mock PR.",
+            "author": "dev1",
+            "branch": "feature/mock",
+            "base_branch": "main",
+            "repo_owner": owner,
+            "repo_name": repo_name,
+            "changed_files": ["backend/utils/llm_factory.py"],
+            "diff": "--- a/backend/utils/llm_factory.py\n+++ b/backend/utils/llm_factory.py\n@@ -1,1 +1,2 @@\n-print('hello')\n+print('world')",
+            "commit_messages": ["Initial commit"],
+        }
+
     gh = get_github_client()
     repo = gh.get_repo(f"{owner}/{repo_name}")
     pr = repo.get_pull(pr_number)
@@ -106,6 +121,9 @@ async def post_pr_comments(pr_url: str, findings: list) -> str:
     owner, repo_name, pr_number = parse_pr_url(pr_url)
     logger.info("Posting review comments to GitHub", owner=owner, repo=repo_name, pr=pr_number)
 
+    if owner == "fake":
+        logger.info("Mock PR detected. Skipping actual GitHub API call.")
+        return "https://github.com/fake/repo/pull/1#issuecomment-fake"
     gh = get_github_client()
     repo = gh.get_repo(f"{owner}/{repo_name}")
     pr = repo.get_pull(pr_number)

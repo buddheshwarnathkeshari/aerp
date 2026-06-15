@@ -1,3 +1,4 @@
+import os
 from backend.config.settings import get_settings
 from langchain_core.language_models.chat_models import BaseChatModel
 

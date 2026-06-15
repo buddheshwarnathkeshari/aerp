@@ -55,6 +55,9 @@ async def start_review(request: StartReviewRequest):
         model = settings.openai_model
     elif provider == "anthropic":
         model = settings.anthropic_model
+    elif provider == "ollama":
+        import os
+        model = os.getenv("OLLAMA_MODEL", "llama3.1")
     else:
         provider = "gemini"
         model = settings.gemini_model
