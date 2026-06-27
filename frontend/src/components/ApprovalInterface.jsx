@@ -5,7 +5,7 @@ import FindingsViewer from './FindingsViewer'
 
 const API_BASE = ''
 
-export default function ApprovalInterface({ reviewId, prUrl, review, onApproved }) {
+export default function ApprovalInterface({ reviewId, prUrl, review, findings, onApproved }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -71,9 +71,9 @@ export default function ApprovalInterface({ reviewId, prUrl, review, onApproved 
         </div>
       </div>
 
-      {/* Findings (no diff available since we use mock data) */}
+      {/* Findings */}
       <h3>Critical AI Findings — Review Before Approving</h3>
-      <FindingsViewer findings={[]} />
+      <FindingsViewer findings={findings || []} reviewId={reviewId} />
     </div>
   )
 }

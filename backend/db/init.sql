@@ -67,6 +67,19 @@ CREATE TABLE IF NOT EXISTS human_decisions (
 );
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- Review execution logs
+-- Persistent storage for agent status updates (used for UI history and auditing).
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS review_logs (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    review_id   UUID NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+    agent_name  TEXT NOT NULL,
+    status      TEXT NOT NULL,          -- running|complete|failed|skipped
+    message     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Embeddings table (pgvector)
 -- Stores document chunks with their vector embeddings for RAG search.
 --

@@ -11,6 +11,7 @@ export default defineConfig({
       '/reviews': {
         target: 'http://host.docker.internal:8000',
         changeOrigin: true,
+        ws: true,
       }
     }
   }

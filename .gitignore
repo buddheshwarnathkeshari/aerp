@@ -27,3 +27,5 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+credentials/
+test_embeddings.py

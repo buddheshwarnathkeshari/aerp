@@ -154,6 +154,73 @@ async def post_pr_comments(pr_url: str, findings: list) -> str:
         logger.error("Failed to post comment", error=str(e))
         return f"Error: {e.data}"
 
+async def post_single_finding_comment(pr_url: str, finding: dict) -> str:
+    """
+    Posts a single review finding to the PR.
+    Attempts an inline review comment if file_path and line_number are available.
+    Falls back to a general issue comment if the line is outside the PR diff.
+    """
+    owner, repo_name, pr_number = parse_pr_url(pr_url)
+    logger.info("Posting single finding to GitHub", owner=owner, repo=repo_name, pr=pr_number)
+
+    if owner == "fake":
+        logger.info("Mock PR detected. Skipping actual GitHub API call.")
+        return "https://github.com/fake/repo/pull/1#issuecomment-fake"
+    
+    gh = get_github_client()
+    repo = gh.get_repo(f"{owner}/{repo_name}")
+    pr = repo.get_pull(pr_number)
+
+    # Use edited message if available, otherwise construct default
+    if finding.get("edited_message"):
+        body = finding["edited_message"]
+    else:
+        title = finding.get("title", "Issue")
+        severity = finding.get("severity", "medium").upper()
+        desc = finding.get("description", "")
+        file_path = finding.get("file_path", "General")
+        
+        body = f"## AERP AI Review Finding\n\n"
+        body += f"### [{severity}] {title}\n"
+        body += f"**File:** `{file_path}`\n\n"
+        body += f"{desc}\n\n"
+        
+        if finding.get("evidence"):
+            body += f"**Evidence:**\n```\n{finding['evidence']}\n```\n\n"
+
+    # Try to post inline comment if file and line are provided
+    file_path = finding.get("file_path")
+    line_number = finding.get("line_number")
+    
+    if file_path and file_path != "General" and line_number:
+        try:
+            # get latest commit in the PR
+            commits = pr.get_commits()
+            latest_commit = commits.reversed[0]
+            
+            # create_review_comment using line (requires PyGithub >= 1.55)
+            comment = pr.create_review_comment(
+                body=body,
+                commit=latest_commit,
+                path=file_path,
+                line=int(line_number)
+            )
+            logger.info("Inline review comment posted successfully", url=comment.html_url)
+            return comment.html_url
+        except GithubException as e:
+            # 422 usually means the line is not part of the PR diff
+            logger.warning("Failed to post inline comment (likely outside diff). Falling back to general issue comment.", error=str(e))
+            # Fall through to post as general issue comment
+
+    # Fallback to general issue comment
+    try:
+        comment = pr.create_issue_comment(body)
+        logger.info("General issue comment posted successfully", url=comment.html_url)
+        return comment.html_url
+    except GithubException as e:
+        logger.error("Failed to post comment", error=str(e))
+        return f"Error: {e.data}"
+
 async def get_file_content(repo_owner: str, repo_name: str, file_path: str, branch: str) -> str:
     """
     Fetches the raw content of a specific file from a GitHub repository.

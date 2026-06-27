@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { Github, Trello, Rocket } from 'lucide-react'
+import ReviewHistory from './ReviewHistory'
 
 const API_BASE = ''
 
@@ -36,7 +37,7 @@ export default function SubmitReview() {
   }
 
   return (
-    <div className="flex justify-center items-center" style={{ flex: 1, marginTop: '10vh' }}>
+    <div className="flex-col justify-start items-center" style={{ flex: 1, marginTop: '5vh' }}>
       <div className="glass-panel animate-slide-up" style={{ width: '100%', maxWidth: '500px' }}>
         <h2 style={{ textAlign: 'center', marginBottom: '0.5rem' }}>Start Code Review</h2>
         <p style={{ textAlign: 'center', marginBottom: '2rem', fontSize: '0.875rem' }}>
@@ -93,6 +94,8 @@ export default function SubmitReview() {
           </button>
         </form>
       </div>
+
+      <ReviewHistory />
     </div>
   )
 }

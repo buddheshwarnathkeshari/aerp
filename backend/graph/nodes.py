@@ -59,6 +59,7 @@ from backend.prompts.scalability import build_human_message as build_scalability
 from backend.prompts.standards import build_human_message as build_standards_msg
 from backend.prompts.architecture import build_human_message as build_architecture_msg
 from backend.prompts.blast_radius import build_human_message as build_blast_radius_msg
+from backend.utils.pubsub import publish_agent_status
 
 import structlog
 
@@ -98,6 +99,7 @@ async def context_collector_node(state: ReviewState) -> dict:
     """
     review_id = state["review_id"]
     logger.info("Starting context collection", review_id=review_id)
+    await publish_agent_status(review_id, "Context Collector", "running", "Gathering PR metadata, Jira ticket, and Google Docs...")
 
     result = {
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -198,6 +200,7 @@ async def context_collector_node(state: ReviewState) -> dict:
         total_indexed = await index_chunks(all_chunks, review_id)
         logger.info("RAG indexing complete", total_chunks=total_indexed)
 
+    await publish_agent_status(review_id, "Context Collector", "complete", "Gathered PR metadata, Jira ticket, and Google Docs.")
     logger.info("Context collection complete", review_id=review_id)
     return result
 
@@ -213,6 +216,8 @@ async def repository_analyzer_node(state: ReviewState) -> dict:
     pr_metadata = state.get("pr_metadata")
     if not pr_metadata:
         return {"error": "Cannot analyze repository: no PR metadata"}
+
+    await publish_agent_status(state["review_id"], "Repository Analyzer", "running", "Determining framework and architectural impact...")
 
     changed_files = pr_metadata.get("changed_files", [])
     logger.info("Analyzing repository", num_files=len(changed_files))
@@ -245,11 +250,49 @@ async def repository_analyzer_node(state: ReviewState) -> dict:
         has_migrations=impact_graph["has_migrations"],
     )
 
+    await publish_agent_status(state["review_id"], "Repository Analyzer", "complete", "Determined framework and architectural impact.")
     return {
         "changed_files_analysis": files_analysis,
         "impact_graph": impact_graph,
         "detected_framework": detected_framework,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 2.5 NODE: Orchestrator Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def orchestrator_node(state: ReviewState) -> dict:
+    """Runs the Orchestrator Agent to select which specialist agents to run."""
+    from backend.agents.orchestrator_agent import orchestrator_agent
+    await publish_agent_status(state["review_id"], "Orchestrator Agent", "running", "Determining which specialist agents to run...")
+    res = await orchestrator_agent.run(state=state)
+    await publish_agent_status(state["review_id"], "Orchestrator Agent", "complete", "Finished agent selection.")
+    
+    selected_agents = res.get("selected_agents", [])
+    
+    # Broadcast skipped status for agents not selected
+    agent_map = {
+        "code_review": "Code Review Agent",
+        "security": "Security Agent",
+        "database": "Database Agent",
+        "requirements": "Requirements Agent",
+        "scalability": "Scalability Agent",
+        "standards": "Standards Agent",
+        "architecture": "Architecture Agent",
+        "blast_radius": "Blast Radius Agent"
+    }
+    
+    for key, name in agent_map.items():
+        if key not in selected_agents:
+            await publish_agent_status(
+                state["review_id"], 
+                name, 
+                "skipped", 
+                "Skipped by orchestrator: Not relevant for this PR."
+            )
+            
+    return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -265,7 +308,10 @@ async def code_review_node(state: ReviewState) -> dict:
     raw_context = state.get("raw_context", "")
     human_message = build_code_review_msg(raw_context, pr_metadata)
     logger.info("Running Code Review Agent", review_id=state["review_id"])
-    return await code_review_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Code Review Agent", "running", "Analyzing diff for bugs and logic errors...")
+    res = await code_review_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Code Review Agent", "complete", "Finished analyzing diff for bugs and logic errors.")
+    return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,7 +325,10 @@ async def security_node(state: ReviewState) -> dict:
         return _empty_agent_result("security_agent", "security_result")
     human_message = build_security_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Security Agent", review_id=state["review_id"])
-    return await security_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Security Agent", "running", "Scanning for OWASP vulnerabilities...")
+    res = await security_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Security Agent", "complete", "Finished scanning for OWASP vulnerabilities.")
+    return res
 
 
 async def database_node(state: ReviewState) -> dict:
@@ -289,7 +338,10 @@ async def database_node(state: ReviewState) -> dict:
         return _empty_agent_result("database_agent", "database_result")
     human_message = build_database_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Database Agent", review_id=state["review_id"])
-    return await database_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Database Agent", "running", "Checking for N+1 queries and unsafe migrations...")
+    res = await database_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Database Agent", "complete", "Finished checking for N+1 queries and unsafe migrations.")
+    return res
 
 
 async def requirements_node(state: ReviewState) -> dict:
@@ -299,7 +351,10 @@ async def requirements_node(state: ReviewState) -> dict:
         return _empty_agent_result("requirements_agent", "requirements_result")
     human_message = build_requirements_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Requirements Agent", review_id=state["review_id"])
-    return await requirements_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Requirements Agent", "running", "Verifying Jira acceptance criteria compliance...")
+    res = await requirements_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Requirements Agent", "complete", "Finished verifying Jira acceptance criteria compliance.")
+    return res
 
 
 async def scalability_node(state: ReviewState) -> dict:
@@ -309,7 +364,10 @@ async def scalability_node(state: ReviewState) -> dict:
         return _empty_agent_result("scalability_agent", "scalability_result")
     human_message = build_scalability_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Scalability Agent", review_id=state["review_id"])
-    return await scalability_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Scalability Agent", "running", "Evaluating performance under high load...")
+    res = await scalability_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Scalability Agent", "complete", "Finished evaluating performance under high load.")
+    return res
 
 
 async def standards_node(state: ReviewState) -> dict:
@@ -319,7 +377,10 @@ async def standards_node(state: ReviewState) -> dict:
         return _empty_agent_result("standards_agent", "standards_result")
     human_message = build_standards_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Standards Agent", review_id=state["review_id"])
-    return await standards_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Standards Agent", "running", "Checking error handling and logging standards...")
+    res = await standards_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Standards Agent", "complete", "Finished checking error handling and logging standards.")
+    return res
 
 
 async def architecture_node(state: ReviewState) -> dict:
@@ -329,7 +390,10 @@ async def architecture_node(state: ReviewState) -> dict:
         return _empty_agent_result("architecture_agent", "architecture_result")
     human_message = build_architecture_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Architecture Agent", review_id=state["review_id"])
-    return await architecture_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Architecture Agent", "running", "Evaluating SOLID principles and design patterns...")
+    res = await architecture_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Architecture Agent", "complete", "Finished evaluating SOLID principles and design patterns.")
+    return res
 
 
 async def blast_radius_node(state: ReviewState) -> dict:
@@ -339,7 +403,10 @@ async def blast_radius_node(state: ReviewState) -> dict:
         return _empty_agent_result("blast_radius_agent", "blast_radius_result")
     human_message = build_blast_radius_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Blast Radius Agent", review_id=state["review_id"])
-    return await blast_radius_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Blast Radius Agent", "running", "Analyzing downstream failure impacts...")
+    res = await blast_radius_agent.run(state=state, human_message=human_message)
+    await publish_agent_status(state["review_id"], "Blast Radius Agent", "complete", "Finished analyzing downstream failure impacts.")
+    return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -350,7 +417,10 @@ async def consensus_node(state: ReviewState) -> dict:
     """Runs the Consensus Agent to unify all findings and compute final risk score."""
     from backend.agents.consensus_agent import consensus_agent
     logger.info("Running Consensus Agent", review_id=state["review_id"])
-    return await consensus_agent.run(state=state)
+    await publish_agent_status(state["review_id"], "Consensus Agent", "running", "Merging all findings and calculating final risk score...")
+    res = await consensus_agent.run(state=state)
+    await publish_agent_status(state["review_id"], "Consensus Agent", "complete", "Finished merging all findings and calculating final risk score.")
+    return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────

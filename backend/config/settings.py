@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # Gemini
     google_api_key: str
     gemini_model: str = Field(default="gemini-2.5-flash")
-    gemini_embedding_model: str = Field(default="models/text-embedding-004")
+    gemini_embedding_model: str = Field(default="text-embedding-004")
     
     # OpenAI
     openai_api_key: str = Field(default="")

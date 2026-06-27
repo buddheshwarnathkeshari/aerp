@@ -59,6 +59,8 @@ from backend.graph.nodes import (
     # Phase 2
     context_collector_node,
     repository_analyzer_node,
+    # Phase 2.5
+    orchestrator_node,
     # Phase 3 + 4 agents
     code_review_node,
     security_node,
@@ -91,6 +93,20 @@ AGENT_NODES = [
 ]
 
 
+def route_agents(state: ReviewState) -> list[str]:
+    """
+    Conditional edge logic to route to selected agents.
+    Returns a list of node names to execute in parallel.
+    """
+    selected = state.get("selected_agents")
+    if not selected:
+        # Fallback: run all agents
+        return AGENT_NODES
+    
+    # Ensure we only route to valid agent nodes
+    valid_agents = [agent for agent in selected if agent in AGENT_NODES]
+    return valid_agents if valid_agents else AGENT_NODES
+
 def route_after_consensus(state: ReviewState) -> str:
     """
     Conditional edge logic after the consensus agent finishes.
@@ -120,6 +136,7 @@ def create_workflow(checkpointer=None):
     # ── Register nodes ────────────────────────────────────────────────────────
     builder.add_node("context_collector", context_collector_node)
     builder.add_node("repository_analyzer", repository_analyzer_node)
+    builder.add_node("orchestrator", orchestrator_node)
 
     # Phase 3 + 4 agent nodes
     builder.add_node("code_review", code_review_node)
@@ -141,10 +158,14 @@ def create_workflow(checkpointer=None):
     # ── Define edges ──────────────────────────────────────────────────────────
     builder.add_edge(START, "context_collector")
     builder.add_edge("context_collector", "repository_analyzer")
+    builder.add_edge("repository_analyzer", "orchestrator")
 
-    # FAN-OUT: repo_analyzer → [8 agents]
-    for agent_node in AGENT_NODES:
-        builder.add_edge("repository_analyzer", agent_node)
+    # FAN-OUT: orchestrator → [selected agents]
+    builder.add_conditional_edges(
+        "orchestrator",
+        route_agents,
+        {node: node for node in AGENT_NODES}
+    )
 
     # FAN-IN: [8 agents] → consensus
     for agent_node in AGENT_NODES:

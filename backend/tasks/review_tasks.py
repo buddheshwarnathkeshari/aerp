@@ -82,12 +82,18 @@ def run_review_task(self, review_id: str, pr_url: str, jira_url: str = None, doc
         
         if exec_status == "paused":
             # The workflow paused at the HITL node!
-            asyncio.run(_update_review_status(review_id, "paused_for_review"))
+            consensus_res = final_state.get("consensus_result") or {}
+            risk_score = consensus_res.get("risk_score", _compute_risk_score(final_state.get("agent_findings", [])))
+            
+            # Persist findings to DB so the UI can display them
+            agent_findings = final_state.get("agent_findings", [])
+            if agent_findings:
+                asyncio.run(_persist_findings(review_id, agent_findings))
+                
+            asyncio.run(_update_review_status(review_id, "paused_for_review", risk_score=risk_score))
             logger.warning("Workflow paused for Human-in-the-Loop review", review_id=review_id)
             
             # Send Slack notification
-            consensus_res = final_state.get("consensus_result") or {}
-            risk_score = consensus_res.get("risk_score", 0)
             from backend.utils.slack_tool import send_slack_notification
             asyncio.run(send_slack_notification(review_id, pr_url, risk_score))
             
@@ -193,7 +199,7 @@ async def _persist_findings(review_id: str, findings: list):
         await conn.close()
 
 
-async def _update_review_status(review_id: str, status: str, error: str = None):
+async def _update_review_status(review_id: str, status: str, error: str = None, risk_score: int = None):
     """Updates the review status in PostgreSQL."""
     conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
     conn = await asyncpg.connect(conn_string)
@@ -202,6 +208,11 @@ async def _update_review_status(review_id: str, status: str, error: str = None):
             await conn.execute(
                 "UPDATE reviews SET status=$1, error=$2, updated_at=NOW() WHERE id=$3",
                 status, error, review_id,
+            )
+        elif risk_score is not None:
+            await conn.execute(
+                "UPDATE reviews SET status=$1, risk_score=$2, updated_at=NOW() WHERE id=$3",
+                status, risk_score, review_id,
             )
         else:
             await conn.execute(

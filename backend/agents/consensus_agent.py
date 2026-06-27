@@ -76,6 +76,11 @@ class ConsensusAgent:
             else:
                 report: ConsensusReport = await llm.ainvoke(messages)
 
+            # Strict Policy: If risk score triggers HITL (>40), always REQUEST_CHANGES
+            if report.risk_score > 40:
+                from backend.models.findings import Recommendation
+                report.recommendation = Recommendation.REQUEST_CHANGES
+
             elapsed = round(time.time() - start_time, 2)
             logger.info(
                 f"{self.agent_name} complete",

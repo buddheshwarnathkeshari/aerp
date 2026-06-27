@@ -16,7 +16,7 @@ function App() {
             <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em' }}>AERP</h1>
           </Link>
           <nav>
-            <Link to="/" style={{ color: 'var(--text-secondary)', textDecoration: 'none', fontSize: '0.875rem', fontWeight: 500 }}>New Review</Link>
+            <Link to="/" className="btn btn-primary">+ New Review</Link>
           </nav>
         </div>
       </header>

@@ -163,6 +163,7 @@ class ReviewState(TypedDict):
     # ── Agent results — filled in PARALLEL by each agent ─────────────────────
     # Annotated[list, add] means these lists are APPENDED when parallel
     # agents write to them simultaneously (not overwritten).
+    selected_agents: Optional[list[str]]                # List of agents chosen by orchestrator
     agent_findings: Annotated[list[AgentFinding], add]  # All findings from all agents
 
     # Individual agent results (each agent writes its own key)
@@ -226,6 +227,7 @@ def create_initial_state(
         impact_graph=None,
         detected_framework=None,
         # Agent findings — empty lists (Annotated reducer expects lists)
+        selected_agents=None,
         agent_findings=[],
         # Individual agent results
         requirements_result=None,

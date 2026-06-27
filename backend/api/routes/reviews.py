@@ -172,9 +172,9 @@ async def get_review_findings(review_id: str, severity: str = None):
         if severity:
             rows = await conn.fetch(
                 f"""
-                SELECT agent, severity, confidence, title, description,
+                SELECT id, agent, severity, confidence, title, description,
                        file_path, line_number, evidence, suggested_fix, owasp_category,
-                       created_at
+                       included_in_pr, created_at
                 FROM agent_findings
                 WHERE review_id = $1 AND severity = $2
                 ORDER BY {severity_order}
@@ -184,9 +184,9 @@ async def get_review_findings(review_id: str, severity: str = None):
         else:
             rows = await conn.fetch(
                 f"""
-                SELECT agent, severity, confidence, title, description,
+                SELECT id, agent, severity, confidence, title, description,
                        file_path, line_number, evidence, suggested_fix, owasp_category,
-                       created_at
+                       included_in_pr, created_at
                 FROM agent_findings
                 WHERE review_id = $1
                 ORDER BY {severity_order}
@@ -202,6 +202,101 @@ async def get_review_findings(review_id: str, severity: str = None):
         "total": len(findings),
         "findings": findings,
     }
+
+
+@router.get("/{review_id}/logs")
+async def get_review_logs(review_id: str):
+    """
+    Fetch historical execution logs for a review.
+    Used by the UI to restore log state on refresh.
+    """
+    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(conn_string)
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT agent_name, status, message, created_at
+            FROM review_logs
+            WHERE review_id = $1
+            ORDER BY created_at ASC
+            """,
+            review_id,
+        )
+    finally:
+        await conn.close()
+        
+    return {"logs": [dict(r) for r in rows]}
+
+@router.get("")
+async def list_reviews(limit: int = 20):
+    """
+    List recent reviews for the homepage dashboard.
+    """
+    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(conn_string)
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT id, pr_url, status, risk_score, created_at
+            FROM reviews
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    finally:
+        await conn.close()
+        
+    return {"reviews": [dict(r) for r in rows]}
+
+from pydantic import BaseModel
+from typing import Optional
+
+class PostFindingRequest(BaseModel):
+    edited_message: Optional[str] = None
+
+@router.post("/{review_id}/findings/{finding_id}/post")
+async def post_finding_to_pr(review_id: str, finding_id: str, request: PostFindingRequest = None):
+    """
+    Posts a specific finding directly to the PR as a comment.
+    Accepts an optional edited_message.
+    """
+    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(conn_string)
+    try:
+        # Get the review to find the PR URL
+        review = await conn.fetchrow("SELECT pr_url FROM reviews WHERE id = $1", review_id)
+        if not review:
+            raise HTTPException(status_code=404, detail="Review not found")
+            
+        # Get the specific finding
+        finding = await conn.fetchrow(
+            """
+            SELECT title, severity, description, file_path, evidence, included_in_pr 
+            FROM agent_findings 
+            WHERE id = $1 AND review_id = $2
+            """, 
+            finding_id, review_id
+        )
+        if not finding:
+            raise HTTPException(status_code=404, detail="Finding not found")
+            
+        if finding["included_in_pr"]:
+            return {"message": "Already posted"}
+            
+        # Call the GitHub tool
+        from backend.tools.github_tool import post_single_finding_comment
+        finding_dict = dict(finding)
+        if request and request.edited_message:
+            finding_dict["edited_message"] = request.edited_message
+        url = await post_single_finding_comment(review["pr_url"], finding_dict)
+        
+        # Mark as posted
+        await conn.execute("UPDATE agent_findings SET included_in_pr = TRUE WHERE id = $1", finding_id)
+        
+        return {"message": "Successfully posted", "url": url}
+    finally:
+        await conn.close()
 
 
 from pydantic import BaseModel
@@ -265,3 +360,34 @@ async def approve_review(review_id: str, request: ApproveReviewRequest):
     generate_artifacts_task.delay(review_id)
     
     return {"message": "Review resumed and completed successfully. Artifact generation started.", "review_id": review_id}
+
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
+
+@router.websocket("/{review_id}/ws")
+async def review_progress_ws(websocket: WebSocket, review_id: str):
+    """
+    WebSocket endpoint to stream real-time execution progress of the agents
+    for a specific review.
+    """
+    await websocket.accept()
+    from backend.utils.pubsub import get_redis_client
+    client = get_redis_client()
+    pubsub = client.pubsub()
+    channel = f"review:{review_id}:progress"
+    
+    try:
+        await pubsub.subscribe(channel)
+        while True:
+            # timeout=1.0 ensures we don't block forever if the client disconnects
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message:
+                await websocket.send_text(message["data"])
+            await asyncio.sleep(0.1)
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected", review_id=review_id)
+    except Exception as e:
+        logger.error("WebSocket error", error=str(e), review_id=review_id)
+    finally:
+        await pubsub.unsubscribe(channel)
+        await pubsub.close()

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
-import { Loader, CheckCircle, AlertTriangle, Clock } from 'lucide-react'
+import { Loader, CheckCircle, AlertTriangle, Clock, MinusCircle } from 'lucide-react'
 import ApprovalInterface from './ApprovalInterface'
 import FindingsViewer from './FindingsViewer'
 
@@ -35,13 +35,15 @@ export default function ReviewDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const [progressLogs, setProgressLogs] = useState({})
+
   const fetchStatus = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/reviews/${id}/status`)
       setReview(res.data)
       
-      // If complete, also fetch findings
-      if (res.data.status === 'complete') {
+      // If complete or paused for review, also fetch findings
+      if (['complete', 'paused_for_review', 'awaiting_human'].includes(res.data.status)) {
         const findRes = await axios.get(`${API_BASE}/reviews/${id}/findings`)
         setFindings(findRes.data.findings || [])
       }
@@ -54,9 +56,24 @@ export default function ReviewDashboard() {
     }
   }, [id])
 
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/reviews/${id}/logs`)
+      const logs = res.data.logs || []
+      const logObj = {}
+      logs.forEach(log => {
+        logObj[log.agent_name] = { agent: log.agent_name, status: log.status, message: log.message }
+      })
+      setProgressLogs(prev => ({ ...logObj, ...prev }))
+    } catch (err) {
+      console.error("Failed to load historical logs", err)
+    }
+  }, [id])
+
   useEffect(() => {
     fetchStatus()
-  }, [fetchStatus])
+    fetchLogs()
+  }, [fetchStatus, fetchLogs])
 
   // Poll every 5 seconds while actively processing
   useEffect(() => {
@@ -67,11 +84,41 @@ export default function ReviewDashboard() {
     return () => clearInterval(interval)
   }, [review?.status, fetchStatus])
 
+  // WebSocket for real-time progress
+  useEffect(() => {
+    if (!review) return
+    if (!ACTIVE_STATUSES.has(review.status)) return
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    // When proxying via Vite, the port is handled by Vite proxy for ws too
+    const wsUrl = `${protocol}//${window.location.host}${API_BASE}/reviews/${id}/ws`
+    
+    const ws = new WebSocket(wsUrl)
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.agent) {
+          setProgressLogs(prev => ({ ...prev, [data.agent]: data }))
+        } else {
+          // Fallback if structured but no agent key
+          setProgressLogs(prev => ({ ...prev, [event.data]: { agent: event.data, message: event.data, status: 'running' } }))
+        }
+      } catch (e) {
+        // Fallback for raw text logs
+        setProgressLogs(prev => ({ ...prev, [event.data]: { agent: event.data, message: event.data, status: 'running' } }))
+      }
+    }
+    
+    return () => {
+      ws.close()
+    }
+  }, [id, review?.status])
+
   if (loading) {
     return (
       <div className="flex justify-center items-center" style={{ flex: 1, marginTop: '20vh' }}>
         <div className="flex-col items-center gap-4 text-center">
-          <Loader size={48} color="var(--accent-primary)" style={{ animation: 'spin 1.5s linear infinite' }} />
+          <Loader size={48} color="var(--accent-primary)" className="animate-spin" />
           <p>Loading review...</p>
         </div>
       </div>
@@ -94,7 +141,7 @@ export default function ReviewDashboard() {
   const isHITL = ['awaiting_human', 'paused_for_review'].includes(review.status)
 
   if (isHITL) {
-    return <ApprovalInterface reviewId={id} prUrl={prUrl} review={review} onApproved={fetchStatus} />
+    return <ApprovalInterface reviewId={id} prUrl={prUrl} review={review} findings={findings} onApproved={fetchStatus} />
   }
 
   return (
@@ -133,30 +180,81 @@ export default function ReviewDashboard() {
         </div>
       </div>
 
-      {/* Active: Show spinner */}
-      {ACTIVE_STATUSES.has(review.status) && (
-        <div className="glass-panel flex-col items-center justify-center animate-pulse" style={{ padding: '4rem', textAlign: 'center' }}>
-          <div style={{ position: 'relative', display: 'inline-flex', marginBottom: '1.5rem' }}>
-            <Loader size={56} color="var(--accent-primary)" style={{ animation: 'spin 1.5s linear infinite' }} />
-          </div>
-          <h3 style={{ margin: 0 }}>{STATUS_LABELS[review.status] || 'Processing...'}</h3>
-          <p style={{ margin: '0.5rem 0 0 0', color: 'var(--text-secondary)' }}>
-            AI agents are analyzing your PR. This typically takes 2–5 minutes.
-          </p>
-          <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-            {['Collecting', 'Analyzing', 'Reviewing', 'Consensus'].map((step, i) => (
-              <div key={step} style={{
-                padding: '0.375rem 0.75rem',
-                borderRadius: '9999px',
-                fontSize: '0.75rem',
-                background: i < 2 ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
-                color: i < 2 ? 'var(--accent-primary)' : 'var(--text-muted)',
-                border: `1px solid ${i < 2 ? 'rgba(59,130,246,0.4)' : 'var(--border-color)'}`,
-              }}>{step}</div>
-            ))}
+      {/* Active: Processing */}
+      {ACTIVE_STATUSES.has(review.status) && (() => {
+        let inferredStep = 0;
+        const logAgents = Object.keys(progressLogs);
+        if (logAgents.includes('Repository Analyzer') || logAgents.includes('Orchestrator Agent')) inferredStep = 1;
+        const specialistAgents = ['Code Review Agent', 'Security Agent', 'Database Agent', 'Requirements Agent', 'Scalability Agent', 'Standards Agent', 'Architecture Agent', 'Blast Radius Agent'];
+        if (specialistAgents.some(a => logAgents.includes(a))) inferredStep = 2;
+        if (logAgents.includes('Consensus Agent')) inferredStep = 3;
+
+        const stepNames = ['Collecting PR Info', 'Analyzing Repository', 'Agent Review in Progress', 'Reaching Consensus'];
+
+        return (
+          <div className="glass-panel flex-col items-center justify-center animate-breathing-bg" style={{ padding: '4rem', textAlign: 'center' }}>
+            <div style={{ position: 'relative', display: 'inline-flex', marginBottom: '1.5rem' }}>
+              <Loader size={56} color="var(--accent-primary)" className="animate-spin" />
+            </div>
+            <h3 style={{ margin: 0 }}>{stepNames[inferredStep]}</h3>
+            
+            <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+              {['Collecting', 'Analyzing', 'Reviewing', 'Consensus'].map((step, i) => {
+                const isActive = i <= inferredStep;
+                return (
+                  <div key={step} style={{
+                    padding: '0.375rem 0.75rem',
+                    borderRadius: '9999px',
+                    fontSize: '0.75rem',
+                    background: isActive ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
+                    color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
+                    border: `1px solid ${isActive ? 'rgba(59,130,246,0.4)' : 'var(--border-color)'}`,
+                    transition: 'all 0.3s ease'
+                  }}>{step}</div>
+                );
+              })}
+            </div>
+
+          <div style={{
+            marginTop: '2rem',
+            width: '100%',
+            maxWidth: '800px',
+            background: 'rgba(0,0,0,0.5)',
+            borderRadius: '8px',
+            padding: '1.25rem',
+            textAlign: 'left',
+            fontFamily: 'monospace',
+            fontSize: '0.85rem',
+            color: 'var(--text-secondary)',
+            height: '350px',
+            overflowY: 'auto',
+            border: '1px solid var(--border-color)',
+            boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.2)'
+          }}>
+            {Object.keys(progressLogs).length === 0 ? (
+              <div style={{ opacity: 0.5 }}>Waiting for agents to report progress...</div>
+            ) : (
+              Object.values(progressLogs).map((log, i) => (
+                <div key={log.agent || i} style={{ marginBottom: '0.5rem', animation: 'slideUp 0.2s ease-out', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {log.status === 'running' ? (
+                    <Loader size={14} color="var(--text-muted)" className="animate-spin" style={{ flexShrink: 0 }} />
+                  ) : log.status === 'skipped' ? (
+                    <MinusCircle size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                  ) : log.status === 'complete' ? (
+                    <CheckCircle size={14} color="var(--accent-success)" style={{ flexShrink: 0 }} />
+                  ) : (
+                    <span style={{ color: 'var(--accent-success)', flexShrink: 0 }}>➜</span>
+                  )}
+                  <span>
+                    <strong style={{ color: 'var(--text-primary)' }}>{log.agent}:</strong> {log.message}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Complete: Show results */}
       {review.status === 'complete' && (
@@ -189,7 +287,7 @@ export default function ReviewDashboard() {
           </div>
 
           <h3>Agent Findings ({findings.length})</h3>
-          <FindingsViewer findings={findings} />
+          <FindingsViewer findings={findings} reviewId={id} />
         </div>
       )}
 

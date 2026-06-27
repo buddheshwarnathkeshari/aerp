@@ -85,6 +85,7 @@ class CodeFinding(BaseModel):
     )
 
     confidence: float = Field(
+        default=0.8,
         ge=0.0, le=1.0,
         description="Your confidence that this is a real issue, from 0.0 to 1.0. "
                     "0.9+ = very certain. 0.5 = unsure. Be honest — "
@@ -113,6 +114,7 @@ class CodeFinding(BaseModel):
     )
 
     evidence: str = Field(
+        default="Not provided.",
         description="The exact code snippet or pattern you observed that led to this finding. "
                     "Quote the relevant lines. This is your proof."
     )
@@ -161,6 +163,7 @@ class AgentReport(BaseModel):
     )
 
     confidence: float = Field(
+        default=0.8,
         ge=0.0, le=1.0,
         description="Your overall confidence in this review, from 0.0 to 1.0."
     )
