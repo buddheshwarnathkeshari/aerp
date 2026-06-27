@@ -3,6 +3,13 @@ backend/rag/indexer.py
 
 Stores document chunks + their embeddings into pgvector.
 Called during context collection — before any agents run.
+
+RESILIENCE:
+  If the embedding API fails (e.g., 403 billing not set up, rate limit),
+  we log a warning and continue WITHOUT embeddings.
+  The Code Review Agent can still run using the raw context string.
+  RAG search will return empty results, but the agent will still produce findings.
+  This avoids a single API error killing the entire review.
 """
 
 import asyncpg
@@ -29,12 +36,17 @@ async def index_chunks(
         db_conn_string: PostgreSQL connection string (defaults to settings)
 
     Returns:
-        Number of chunks successfully indexed
+        Number of chunks successfully indexed (0 if embedding unavailable)
 
     BATCH PROCESSING:
       We embed in batches of 100 to avoid hitting Gemini API rate limits.
-      Sending 1000 individual embedding requests would hit rate limits.
       Batching reduces API calls from N to N/100.
+
+    FAILURE HANDLING:
+      If embedding fails (403, quota exceeded, network error), we:
+      1. Log a warning with the reason
+      2. Return 0 (no chunks indexed)
+      3. Let the workflow continue — agents will use raw_context instead
     """
     if not chunks:
         return 0
@@ -47,7 +59,6 @@ async def index_chunks(
     batch_size = 100
     total_indexed = 0
 
-    # Connect to PostgreSQL
     conn = await asyncpg.connect(conn_string)
 
     try:
@@ -55,13 +66,24 @@ async def index_chunks(
             batch = chunks[i:i + batch_size]
             texts = [chunk.content for chunk in batch]
 
-            # Embed the entire batch in one API call
             logger.info(
                 "Embedding batch",
                 batch_num=i // batch_size + 1,
                 batch_size=len(batch),
             )
-            embeddings = await embedder.aembed_documents(texts)
+
+            try:
+                embeddings = await embedder.aembed_documents(texts)
+            except Exception as embed_err:
+                # Embedding failed (billing not set up, quota, etc.)
+                # Log a warning and skip — the review continues without RAG
+                logger.warning(
+                    "Embedding API unavailable — skipping RAG indexing",
+                    error=str(embed_err),
+                    review_id=review_id,
+                    hint="Enable billing at console.cloud.google.com to activate RAG search",
+                )
+                return 0  # No chunks indexed, but workflow continues
 
             # Store each chunk + embedding in PostgreSQL
             for chunk, embedding in zip(batch, embeddings):
@@ -73,8 +95,8 @@ async def index_chunks(
                     review_id,
                     chunk.source,
                     chunk.content,
-                    str(chunk.metadata).replace("'", '"'),  # Convert to JSON string
-                    str(embedding),  # pgvector accepts string representation
+                    str(chunk.metadata).replace("'", '"'),
+                    str(embedding),
                 )
 
             total_indexed += len(batch)

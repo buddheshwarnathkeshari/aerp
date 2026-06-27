@@ -3,7 +3,7 @@ backend/graph/workflow.py
 
 Assembles the LangGraph StateGraph — the complete workflow.
 
-PHASE 2 GRAPH (simple, just context collection):
+PHASE 3 GRAPH (context collection + code review agent):
 
   START
     │
@@ -11,12 +11,17 @@ PHASE 2 GRAPH (simple, just context collection):
   [context_collector_node]   ← Fetch PR + Jira + Docs + RAG index
     │
     ▼
-  [repository_analyzer_node] ← Analyze changed files
+  [repository_analyzer_node] ← Analyze changed files, detect framework
+    │
+    ▼
+  [code_review_node]         ← AI code review (Gemini structured output)
     │
     ▼
   END
 
-This will grow in later phases as we add agents, consensus, and HITL.
+PHASE 4 UPGRADE (parallel agents — only workflow.py changes):
+  After repo_analyzer, we will fan out to 8 agents simultaneously
+  using LangGraph's Send() API, then fan in to consensus.
 
 LANGGRAPH KEY CONCEPTS USED HERE:
   StateGraph   → The graph container (holds nodes + edges + state type)
@@ -40,6 +45,7 @@ from backend.graph.state import ReviewState
 from backend.graph.nodes import (
     context_collector_node,
     repository_analyzer_node,
+    code_review_node,
 )
 from backend.config.settings import get_settings
 
@@ -53,7 +59,7 @@ def create_workflow(checkpointer=None):
     Args:
         checkpointer: Optional checkpointer for state persistence.
                       Required for HITL (pause/resume).
-                      In Phase 2, we pass None (no HITL yet).
+                      In Phase 3, we pass None (no HITL yet).
 
     Returns:
         A compiled LangGraph graph ready to run.
@@ -71,15 +77,17 @@ def create_workflow(checkpointer=None):
     # node name → function that implements the node
     builder.add_node("context_collector", context_collector_node)
     builder.add_node("repository_analyzer", repository_analyzer_node)
+    builder.add_node("code_review", code_review_node)   # ← NEW in Phase 3
 
     # ── Define edges (execution order) ────────────────────────────────────────
     # START is a special LangGraph constant representing the entry point
     builder.add_edge(START, "context_collector")
     builder.add_edge("context_collector", "repository_analyzer")
-    builder.add_edge("repository_analyzer", END)
+    builder.add_edge("repository_analyzer", "code_review")   # ← NEW in Phase 3
+    builder.add_edge("code_review", END)                      # ← NEW in Phase 3
 
     # ── Compile ───────────────────────────────────────────────────────────────
-    # checkpointer=None in Phase 2
+    # checkpointer=None in Phase 3
     # checkpointer=RedisSaver in Phase 6 (enables HITL pause/resume)
     graph = builder.compile(checkpointer=checkpointer)
 
@@ -91,7 +99,7 @@ def get_redis_checkpointer():
     Creates a Redis-backed checkpointer for HITL state persistence.
     Used in Phase 6 when we add human-in-the-loop.
 
-    NOT USED IN PHASE 2 — here for reference.
+    NOT USED IN PHASE 3 — here for reference.
     """
     return RedisSaver.from_conn_string(settings.redis_url)
 

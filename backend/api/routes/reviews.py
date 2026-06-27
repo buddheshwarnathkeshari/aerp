@@ -127,3 +127,64 @@ async def get_review_status(review_id: str):
 async def health_check():
     """Simple health check endpoint for Docker."""
     return {"status": "healthy", "service": "aerp-api"}
+
+
+@router.get("/{review_id}/findings")
+async def get_review_findings(review_id: str, severity: str = None):
+    """
+    Fetch all agent findings for a completed review.
+
+    Query params:
+      ?severity=critical   -> filter by severity level
+
+    WHY SEPARATE FROM /status?
+      /status is lightweight -- just the review row.
+      /findings can be large (many findings with full descriptions).
+      Separating them lets the UI load status fast, then lazily
+      fetch findings only when the user opens the detail view.
+    """
+    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(conn_string)
+    try:
+        severity_order = """
+          CASE severity
+            WHEN 'critical' THEN 1
+            WHEN 'high'     THEN 2
+            WHEN 'medium'   THEN 3
+            WHEN 'low'      THEN 4
+            ELSE 5
+          END, confidence DESC
+        """
+        if severity:
+            rows = await conn.fetch(
+                f"""
+                SELECT agent, severity, confidence, title, description,
+                       file_path, line_number, evidence, suggested_fix, owasp_category,
+                       created_at
+                FROM agent_findings
+                WHERE review_id = $1 AND severity = $2
+                ORDER BY {severity_order}
+                """,
+                review_id, severity,
+            )
+        else:
+            rows = await conn.fetch(
+                f"""
+                SELECT agent, severity, confidence, title, description,
+                       file_path, line_number, evidence, suggested_fix, owasp_category,
+                       created_at
+                FROM agent_findings
+                WHERE review_id = $1
+                ORDER BY {severity_order}
+                """,
+                review_id,
+            )
+    finally:
+        await conn.close()
+
+    findings = [dict(r) for r in rows]
+    return {
+        "review_id": review_id,
+        "total": len(findings),
+        "findings": findings,
+    }

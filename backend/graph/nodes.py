@@ -1,7 +1,7 @@
 """
 backend/graph/nodes.py
 
-LangGraph node functions for Phase 2.
+LangGraph node functions for Phase 2 and Phase 3.
 
 WHAT IS A NODE?
   A node is a regular Python function that:
@@ -16,8 +16,11 @@ PHASE 2 NODES:
   - context_collector_node: Fetches PR, Jira, Docs → builds ReviewState
   - repository_analyzer_node: Analyzes changed files → builds impact graph
 
-PHASE 3+ NODES (not yet):
-  - code_review_node, security_node, etc. (each calls an AI agent)
+PHASE 3 NODES:
+  - code_review_node: Runs the CodeReviewAgent on the PR diff
+
+PHASE 4+ NODES (not yet):
+  - security_node, requirements_node, database_node, etc.
   - consensus_node
   - hitl_node
 """
@@ -32,6 +35,8 @@ from backend.tools.jira_tool import fetch_jira_ticket
 from backend.rag.chunker import chunk_pr_diff, chunk_document
 from backend.rag.indexer import index_chunks
 from backend.config.settings import get_settings
+from backend.agents.code_review_agent import code_review_agent
+from backend.prompts.code_review import build_human_message
 import structlog
 
 logger = structlog.get_logger()
@@ -364,3 +369,56 @@ async def _fetch_google_doc(doc_url: str) -> str:
     except Exception as e:
         logger.warning("Google Docs fetch failed", error=str(e))
         return f"Google Doc content unavailable: {str(e)}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NODE 3: Code Review Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def code_review_node(state: ReviewState) -> dict:
+    """
+    Runs the Code Review Agent on the PR diff.
+
+    INPUTS (reads from state):
+      - pr_metadata    (set by context_collector_node)
+      - raw_context    (set by context_collector_node)
+      - review_id      (for RAG tool scoping)
+
+    OUTPUTS (writes to state):
+      - code_review_result   (AgentResult dict)
+      - agent_findings       (list appended via reducer)
+
+    WHY IS THIS A SEPARATE NODE?
+      In Phase 4, we will run all 8 agents in PARALLEL using LangGraph's
+      Send() API. Each agent must be its own node so the graph can fan
+      them out simultaneously. By making CodeReview a node now, adding
+      parallel execution in Phase 4 requires zero changes to this file.
+    """
+    pr_metadata = state.get("pr_metadata")
+    if not pr_metadata:
+        logger.warning("code_review_node: no pr_metadata in state, skipping")
+        return {
+            "code_review_result": {
+                "agent": "code_review_agent",
+                "findings": [],
+                "overall_assessment": "Skipped: no PR metadata available",
+                "recommendation": "approve_with_comments",
+                "confidence": 0.0,
+                "tokens_used": None,
+            },
+            "agent_findings": [],
+        }
+
+    raw_context = state.get("raw_context", "")
+    human_message = build_human_message(raw_context, pr_metadata)
+
+    logger.info(
+        "Running Code Review Agent",
+        review_id=state["review_id"],
+        diff_length=len(pr_metadata.get("diff", "")),
+    )
+
+    return await code_review_agent.run(
+        state=state,
+        human_message=human_message,
+    )
