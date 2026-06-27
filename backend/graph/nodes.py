@@ -1,7 +1,7 @@
 """
 backend/graph/nodes.py
 
-LangGraph node functions for Phase 2 and Phase 3.
+LangGraph node functions for Phase 2, 3, and 4.
 
 WHAT IS A NODE?
   A node is a regular Python function that:
@@ -19,8 +19,12 @@ PHASE 2 NODES:
 PHASE 3 NODES:
   - code_review_node: Runs the CodeReviewAgent on the PR diff
 
-PHASE 4+ NODES (not yet):
-  - security_node, requirements_node, database_node, etc.
+PHASE 4 NODES (NEW — PARALLEL EXECUTION):
+  - security_node, database_node, requirements_node
+  - scalability_node, standards_node, architecture_node, blast_radius_node
+  - All 8 agents are fanned out simultaneously via LangGraph Send()
+
+PHASE 5+ NODES (not yet):
   - consensus_node
   - hitl_node
 """
@@ -35,8 +39,27 @@ from backend.tools.jira_tool import fetch_jira_ticket
 from backend.rag.chunker import chunk_pr_diff, chunk_document
 from backend.rag.indexer import index_chunks
 from backend.config.settings import get_settings
+
+# Phase 3 — Code Review Agent
 from backend.agents.code_review_agent import code_review_agent
-from backend.prompts.code_review import build_human_message
+from backend.prompts.code_review import build_human_message as build_code_review_msg
+
+# Phase 4 — All parallel agents
+from backend.agents.security_agent import security_agent
+from backend.agents.database_agent import database_agent
+from backend.agents.requirements_agent import requirements_agent
+from backend.agents.scalability_agent import scalability_agent
+from backend.agents.standards_agent import standards_agent
+from backend.agents.architecture_agent import architecture_agent
+from backend.agents.blast_radius_agent import blast_radius_agent
+from backend.prompts.security import build_human_message as build_security_msg
+from backend.prompts.database import build_human_message as build_database_msg
+from backend.prompts.requirements import build_human_message as build_requirements_msg
+from backend.prompts.scalability import build_human_message as build_scalability_msg
+from backend.prompts.standards import build_human_message as build_standards_msg
+from backend.prompts.architecture import build_human_message as build_architecture_msg
+from backend.prompts.blast_radius import build_human_message as build_blast_radius_msg
+
 import structlog
 
 logger = structlog.get_logger()
@@ -121,7 +144,6 @@ async def context_collector_node(state: ReviewState) -> dict:
             # Non-fatal — continue without doc context
 
     # ── Step 4: Build raw_context string ──────────────────────────────────────
-    # This is a combined text summary passed to agents that don't use RAG
     raw_context_parts = [
         f"=== PULL REQUEST: {pr_data['title']} ===",
         f"Author: {pr_data['author']} | Branch: {pr_data['branch']}",
@@ -140,7 +162,7 @@ async def context_collector_node(state: ReviewState) -> dict:
     if doc_content:
         raw_context_parts.extend([
             "\n=== FEATURE DOCUMENTATION ===",
-            doc_content[:3000],  # First 3000 chars of doc
+            doc_content[:3000],
         ])
 
     result["raw_context"] = "\n".join(raw_context_parts)
@@ -148,13 +170,11 @@ async def context_collector_node(state: ReviewState) -> dict:
     # ── Step 5: Chunk + Embed + Index for RAG ─────────────────────────────────
     all_chunks = []
 
-    # Chunk the PR diff (per-file chunking)
     if pr_data.get("diff"):
         pr_chunks = chunk_pr_diff(pr_data["diff"], pr_data)
         all_chunks.extend(pr_chunks)
         logger.info("PR chunked", num_chunks=len(pr_chunks))
 
-    # Chunk Jira ticket
     if jira_ticket:
         jira_text = _jira_to_text(jira_ticket)
         jira_chunks = chunk_document(
@@ -165,7 +185,6 @@ async def context_collector_node(state: ReviewState) -> dict:
         all_chunks.extend(jira_chunks)
         logger.info("Jira chunked", num_chunks=len(jira_chunks))
 
-    # Chunk Google Doc
     if doc_content:
         doc_chunks = chunk_document(
             content=doc_content,
@@ -175,7 +194,6 @@ async def context_collector_node(state: ReviewState) -> dict:
         all_chunks.extend(doc_chunks)
         logger.info("Doc chunked", num_chunks=len(doc_chunks))
 
-    # Index all chunks into pgvector
     if all_chunks:
         total_indexed = await index_chunks(all_chunks, review_id)
         logger.info("RAG indexing complete", total_chunks=total_indexed)
@@ -191,15 +209,6 @@ async def context_collector_node(state: ReviewState) -> dict:
 async def repository_analyzer_node(state: ReviewState) -> dict:
     """
     Analyzes changed files to build an impact graph.
-
-    This is a lightweight analysis using the PR metadata we already have.
-    It doesn't call external APIs — it works with what context_collector_node
-    fetched.
-
-    OUTPUTS:
-      - changed_files_analysis: per-file metadata
-      - impact_graph: what might break if this PR has a bug
-      - detected_framework: "fastapi" | "django" | etc.
     """
     pr_metadata = state.get("pr_metadata")
     if not pr_metadata:
@@ -208,7 +217,6 @@ async def repository_analyzer_node(state: ReviewState) -> dict:
     changed_files = pr_metadata.get("changed_files", [])
     logger.info("Analyzing repository", num_files=len(changed_files))
 
-    # ── Analyze each changed file ──────────────────────────────────────────
     files_analysis = {}
     for filepath in changed_files:
         files_analysis[filepath] = {
@@ -219,12 +227,8 @@ async def repository_analyzer_node(state: ReviewState) -> dict:
             "is_config": _is_config_file(filepath),
         }
 
-    # ── Detect framework ──────────────────────────────────────────────────
     detected_framework = _detect_framework(changed_files)
 
-    # ── Build basic impact graph ──────────────────────────────────────────
-    # In Phase 2, this is a simple categorization.
-    # The Blast Radius Agent (Phase 4) will do deep dependency tracing.
     impact_graph = {
         "changed_layers": list({f["layer"] for f in files_analysis.values() if f["layer"]}),
         "has_migrations": any(f["is_migration"] for f in files_analysis.values()),
@@ -245,6 +249,115 @@ async def repository_analyzer_node(state: ReviewState) -> dict:
         "changed_files_analysis": files_analysis,
         "impact_graph": impact_graph,
         "detected_framework": detected_framework,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 3 NODE: Code Review Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def code_review_node(state: ReviewState) -> dict:
+    """Runs the Code Review Agent on the PR diff."""
+    pr_metadata = state.get("pr_metadata")
+    if not pr_metadata:
+        return _empty_agent_result("code_review_agent", "code_review_result")
+
+    raw_context = state.get("raw_context", "")
+    human_message = build_code_review_msg(raw_context, pr_metadata)
+    logger.info("Running Code Review Agent", review_id=state["review_id"])
+    return await code_review_agent.run(state=state, human_message=human_message)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 4 NODES: All parallel specialist agents
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def security_node(state: ReviewState) -> dict:
+    """Runs the Security Agent — OWASP Top 10 and vulnerability detection."""
+    pr_metadata = state.get("pr_metadata")
+    if not pr_metadata:
+        return _empty_agent_result("security_agent", "security_result")
+    human_message = build_security_msg(state.get("raw_context", ""), pr_metadata)
+    logger.info("Running Security Agent", review_id=state["review_id"])
+    return await security_agent.run(state=state, human_message=human_message)
+
+
+async def database_node(state: ReviewState) -> dict:
+    """Runs the Database Agent — N+1, migrations, query safety."""
+    pr_metadata = state.get("pr_metadata")
+    if not pr_metadata:
+        return _empty_agent_result("database_agent", "database_result")
+    human_message = build_database_msg(state.get("raw_context", ""), pr_metadata)
+    logger.info("Running Database Agent", review_id=state["review_id"])
+    return await database_agent.run(state=state, human_message=human_message)
+
+
+async def requirements_node(state: ReviewState) -> dict:
+    """Runs the Requirements Agent — Jira acceptance criteria compliance."""
+    pr_metadata = state.get("pr_metadata")
+    if not pr_metadata:
+        return _empty_agent_result("requirements_agent", "requirements_result")
+    human_message = build_requirements_msg(state.get("raw_context", ""), pr_metadata)
+    logger.info("Running Requirements Agent", review_id=state["review_id"])
+    return await requirements_agent.run(state=state, human_message=human_message)
+
+
+async def scalability_node(state: ReviewState) -> dict:
+    """Runs the Scalability Agent — performance under load."""
+    pr_metadata = state.get("pr_metadata")
+    if not pr_metadata:
+        return _empty_agent_result("scalability_agent", "scalability_result")
+    human_message = build_scalability_msg(state.get("raw_context", ""), pr_metadata)
+    logger.info("Running Scalability Agent", review_id=state["review_id"])
+    return await scalability_agent.run(state=state, human_message=human_message)
+
+
+async def standards_node(state: ReviewState) -> dict:
+    """Runs the Standards Agent — logging, error handling, maintainability."""
+    pr_metadata = state.get("pr_metadata")
+    if not pr_metadata:
+        return _empty_agent_result("standards_agent", "standards_result")
+    human_message = build_standards_msg(state.get("raw_context", ""), pr_metadata)
+    logger.info("Running Standards Agent", review_id=state["review_id"])
+    return await standards_agent.run(state=state, human_message=human_message)
+
+
+async def architecture_node(state: ReviewState) -> dict:
+    """Runs the Architecture Agent — SOLID, coupling, design patterns."""
+    pr_metadata = state.get("pr_metadata")
+    if not pr_metadata:
+        return _empty_agent_result("architecture_agent", "architecture_result")
+    human_message = build_architecture_msg(state.get("raw_context", ""), pr_metadata)
+    logger.info("Running Architecture Agent", review_id=state["review_id"])
+    return await architecture_agent.run(state=state, human_message=human_message)
+
+
+async def blast_radius_node(state: ReviewState) -> dict:
+    """Runs the Blast Radius Agent — downstream failure impact analysis."""
+    pr_metadata = state.get("pr_metadata")
+    if not pr_metadata:
+        return _empty_agent_result("blast_radius_agent", "blast_radius_result")
+    human_message = build_blast_radius_msg(state.get("raw_context", ""), pr_metadata)
+    logger.info("Running Blast Radius Agent", review_id=state["review_id"])
+    return await blast_radius_agent.run(state=state, human_message=human_message)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper: Empty agent result (used when PR metadata is missing)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _empty_agent_result(agent_name: str, result_key: str) -> dict:
+    """Returns an empty result dict when an agent cannot run."""
+    return {
+        result_key: {
+            "agent": agent_name,
+            "findings": [],
+            "overall_assessment": "Skipped: no PR metadata available",
+            "recommendation": "approve_with_comments",
+            "confidence": 0.0,
+            "tokens_used": None,
+        },
+        "agent_findings": [],
     }
 
 
@@ -331,13 +444,8 @@ Business Rules:
 async def _fetch_google_doc(doc_url: str) -> str:
     """
     Fetches content from a Google Doc.
-
     NOTE: Requires Google Service Account credentials.
-    For Phase 2, returns placeholder if credentials not configured.
-    Full implementation in Phase 3.
     """
-    # Extract document ID from URL
-    # URL format: https://docs.google.com/document/d/{DOC_ID}/edit
     import re
     match = re.search(r"/document/d/([a-zA-Z0-9_-]+)", doc_url)
     if not match:
@@ -356,7 +464,6 @@ async def _fetch_google_doc(doc_url: str) -> str:
         service = build("docs", "v1", credentials=credentials)
         doc = service.documents().get(documentId=doc_id).execute()
 
-        # Extract plain text from Google Docs structure
         content_parts = []
         for element in doc.get("body", {}).get("content", []):
             if "paragraph" in element:
@@ -369,56 +476,3 @@ async def _fetch_google_doc(doc_url: str) -> str:
     except Exception as e:
         logger.warning("Google Docs fetch failed", error=str(e))
         return f"Google Doc content unavailable: {str(e)}"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# NODE 3: Code Review Agent
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def code_review_node(state: ReviewState) -> dict:
-    """
-    Runs the Code Review Agent on the PR diff.
-
-    INPUTS (reads from state):
-      - pr_metadata    (set by context_collector_node)
-      - raw_context    (set by context_collector_node)
-      - review_id      (for RAG tool scoping)
-
-    OUTPUTS (writes to state):
-      - code_review_result   (AgentResult dict)
-      - agent_findings       (list appended via reducer)
-
-    WHY IS THIS A SEPARATE NODE?
-      In Phase 4, we will run all 8 agents in PARALLEL using LangGraph's
-      Send() API. Each agent must be its own node so the graph can fan
-      them out simultaneously. By making CodeReview a node now, adding
-      parallel execution in Phase 4 requires zero changes to this file.
-    """
-    pr_metadata = state.get("pr_metadata")
-    if not pr_metadata:
-        logger.warning("code_review_node: no pr_metadata in state, skipping")
-        return {
-            "code_review_result": {
-                "agent": "code_review_agent",
-                "findings": [],
-                "overall_assessment": "Skipped: no PR metadata available",
-                "recommendation": "approve_with_comments",
-                "confidence": 0.0,
-                "tokens_used": None,
-            },
-            "agent_findings": [],
-        }
-
-    raw_context = state.get("raw_context", "")
-    human_message = build_human_message(raw_context, pr_metadata)
-
-    logger.info(
-        "Running Code Review Agent",
-        review_id=state["review_id"],
-        diff_length=len(pr_metadata.get("diff", "")),
-    )
-
-    return await code_review_agent.run(
-        state=state,
-        human_message=human_message,
-    )
