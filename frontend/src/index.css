@@ -93,6 +93,14 @@ p { color: var(--text-secondary); margin-bottom: 1rem; }
   transform: translateY(-1px);
 }
 
+.dropdown-item {
+  transition: background-color 0.2s ease;
+}
+
+.dropdown-item:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
 .btn-secondary {
   background-color: transparent;
   color: var(--text-primary);
@@ -131,7 +139,13 @@ p { color: var(--text-secondary); margin-bottom: 1rem; }
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 0.875rem;
+  width: 100%;
   transition: var(--transition);
+}
+
+.input-field:hover {
+  background-color: rgba(30, 41, 59, 0.8);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .input-field:focus {

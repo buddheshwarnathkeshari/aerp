@@ -10,12 +10,20 @@ FROM python:3.12-slim
 # Set working directory inside the container
 WORKDIR /app
 
-# WHY copy requirements first, then install, then copy code?
-# Docker caches layers. If you copy all code first, any code change
-# triggers a full pip install. This order means pip install only
-# re-runs when requirements.txt changes — much faster rebuilds.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install system dependencies for building python packages (e.g., psycopg2)
+RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
+
+# Force uv to use python 3.12
+ENV UV_PYTHON=3.12
+
+# Install dependencies (frozen means it won't update uv.lock, similar to npm ci)
+RUN uv sync --frozen --no-dev
 
 # Copy the application code
 COPY . .

@@ -66,7 +66,7 @@ async def retrieve_similar_chunks(
                 SELECT content, source, metadata,
                        embedding <-> $1::vector AS distance
                 FROM embeddings
-                WHERE review_id = $2 AND source = $3
+                WHERE pull_request_id = $2 AND source = $3
                 ORDER BY distance ASC
                 LIMIT $4
                 """,
@@ -81,7 +81,7 @@ async def retrieve_similar_chunks(
                 SELECT content, source, metadata,
                        embedding <-> $1::vector AS distance
                 FROM embeddings
-                WHERE review_id = $2
+                WHERE pull_request_id = $2
                 ORDER BY distance ASC
                 LIMIT $3
                 """,

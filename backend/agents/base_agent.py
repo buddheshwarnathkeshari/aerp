@@ -56,7 +56,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain import hub
 
-from backend.models.findings import AgentReport
+from backend.schemas.findings import AgentReport
 from backend.rag.retriever import build_rag_tool
 from backend.config.settings import get_settings
 import structlog
@@ -182,6 +182,10 @@ class BaseAgent(ABC):
             # Run the ReAct loop: think → (optionally) use tools → final answer
             # We implement a simple loop: first get tool calls, execute, then
             # call the structured output LLM with the enriched context.
+            from backend.utils.pubsub import publish_agent_status
+            
+            await publish_agent_status(review_id, self.agent_name, "running", "Reasoning and determining needed context...")
+            
             tool_results = []
             tool_response = await llm_with_tools.ainvoke(messages)
 
@@ -195,6 +199,12 @@ class BaseAgent(ABC):
                         tool=tool_name,
                         args=tool_args,
                     )
+                    query_str = tool_args.get("query", "")
+                    if query_str:
+                        await publish_agent_status(review_id, self.agent_name, "running", f"Searching codebase for '{query_str}'...")
+                    else:
+                        await publish_agent_status(review_id, self.agent_name, "running", f"Running tool {tool_name}...")
+                        
                     # Find and call the matching tool
                     for t in tools:
                         if t.name == tool_name:
@@ -210,7 +220,7 @@ class BaseAgent(ABC):
 
             import os
             if os.environ.get("MOCK_LLM") == "1":
-                from backend.models.findings import CodeFinding, Severity, Recommendation
+                from backend.schemas.findings import CodeFinding, Severity, Recommendation
                 report = AgentReport(
                     findings=[
                         CodeFinding(
@@ -228,8 +238,11 @@ class BaseAgent(ABC):
                     confidence=0.9,
                 )
             else:
-                from backend.models.findings import Recommendation
+                from backend.schemas.findings import Recommendation
                 # Final call: get structured AgentReport
+                
+                await publish_agent_status(review_id, self.agent_name, "running", "Compiling final findings and recommendations...")
+                
                 report = None
                 current_messages = [
                     SystemMessage(content=self.system_prompt),

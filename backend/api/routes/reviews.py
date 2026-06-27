@@ -7,14 +7,12 @@ DESIGN: Routes only do 3 things:
   1. Validate the request (Pydantic does this automatically)
   2. Call the service/task layer
   3. Return a response
-
-NO business logic here. Routes don't talk to the database directly.
-They don't run agents. They just orchestrate.
 """
 
 import uuid
-import asyncpg
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc, case
 from backend.api.schemas.review_schemas import (
     StartReviewRequest,
     StartReviewResponse,
@@ -22,33 +20,29 @@ from backend.api.schemas.review_schemas import (
 )
 from backend.tasks.review_tasks import run_review_task
 from backend.config.settings import get_settings
+from backend.api.deps import get_db, get_current_user
+from backend.db.models import PullRequest, Comment, User, ReviewLog
 import structlog
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
 logger = structlog.get_logger()
 settings = get_settings()
 
-
 @router.post(
     "/start",
     response_model=StartReviewResponse,
-    status_code=status.HTTP_202_ACCEPTED,  # 202 = Accepted (async processing started)
+    status_code=status.HTTP_202_ACCEPTED,
 )
-async def start_review(request: StartReviewRequest):
-    """
-    Submit a PR for AI review.
-
-    Returns immediately with a review_id.
-    The actual review runs asynchronously via Celery.
-    Poll GET /reviews/{review_id}/status to track progress.
-
-    WHY 202 ACCEPTED instead of 200 OK?
-      200 OK implies the request is fully processed.
-      202 ACCEPTED means: "I received your request and will process it."
-      This is the correct HTTP status for async operations.
-    """
-    review_id = str(uuid.uuid4())
-    logger.info("Starting review", review_id=review_id, pr_url=request.pr_url)
+async def start_review(
+    request: StartReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    review_id = uuid.uuid4()
+    logger.info("Starting review", review_id=str(review_id), pr_url=request.pr_url, user_id=str(current_user.id))
 
     provider = settings.llm_provider.lower() or "gemini"
     if provider == "openai":
@@ -62,318 +56,270 @@ async def start_review(request: StartReviewRequest):
         provider = "gemini"
         model = settings.gemini_model
 
-    # Create the review record in the database
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
-        await conn.execute(
-            """
-            INSERT INTO reviews (id, pr_url, jira_url, doc_url, status, llm_provider, llm_model)
-            VALUES ($1, $2, $3, $4, 'queued', $5, $6)
-            """,
-            review_id,
-            request.pr_url,
-            request.jira_url,
-            request.doc_url,
-            provider,
-            model,
-        )
-    finally:
-        await conn.close()
-
-    # Enqueue the Celery task (non-blocking — returns immediately)
-    task = run_review_task.delay(
-        review_id=review_id,
+    new_pr = PullRequest(
+        id=review_id,
+        user_id=current_user.id,
         pr_url=request.pr_url,
         jira_url=request.jira_url,
         doc_url=request.doc_url,
+        status="queued",
+        llm_provider=provider,
+        llm_model=model
+    )
+    db.add(new_pr)
+    await db.commit()
+
+    task = run_review_task.delay(
+        review_id=str(review_id),
+        pr_url=request.pr_url,
+        jira_url=request.jira_url,
+        doc_url=request.doc_url,
+        user_id=str(current_user.id)
     )
 
-    # Save the task ID so we can cancel it later
-    conn = await asyncpg.connect(conn_string)
-    try:
-        await conn.execute("UPDATE reviews SET task_id = $1 WHERE id = $2", task.id, review_id)
-    finally:
-        await conn.close()
+    new_pr.task_id = task.id
+    await db.commit()
 
     return StartReviewResponse(
-        review_id=review_id,
+        review_id=str(review_id),
         status="queued",
         message="Review started. Poll the status URL for updates.",
         status_url=f"/reviews/{review_id}/status",
     )
 
-
 @router.get("/{review_id}/status", response_model=ReviewStatusResponse)
-async def get_review_status(review_id: str):
-    """
-    Check the status of an ongoing or completed review.
+async def get_review_status(review_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    stmt = select(PullRequest).where(PullRequest.id == uuid.UUID(review_id))
+    result = await db.execute(stmt)
+    pr = result.scalar_one_or_none()
 
-    Clients should poll this every 10-30 seconds until
-    status is "complete", "awaiting_human", or "failed".
-    """
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
-        row = await conn.fetchrow(
-            """
-            SELECT id, status, created_at, updated_at,
-                   completed_at, risk_score, recommendation, error,
-                   llm_provider, llm_model
-            FROM reviews WHERE id = $1
-            """,
-            review_id,
-        )
-    finally:
-        await conn.close()
-
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Review {review_id} not found",
-        )
+    if not pr:
+        raise HTTPException(status_code=404, detail=f"Review {review_id} not found")
+        
+    if pr.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     return ReviewStatusResponse(
-        review_id=str(row["id"]),
-        status=row["status"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-        completed_at=row.get("completed_at"),
-        risk_score=row.get("risk_score"),
-        recommendation=row.get("recommendation"),
-        error=row.get("error"),
-        llm_provider=row.get("llm_provider"),
-        llm_model=row.get("llm_model"),
+        review_id=str(pr.id),
+        status=pr.status,
+        created_at=pr.created_at,
+        updated_at=pr.updated_at,
+        completed_at=pr.completed_at,
+        risk_score=pr.risk_score,
+        recommendation=pr.recommendation,
+        error=pr.error,
+        llm_provider=pr.llm_provider,
+        llm_model=pr.llm_model,
     )
 
-
 @router.post("/{review_id}/cancel")
-async def cancel_review(review_id: str):
-    """
-    Forcefully cancels an ongoing review by terminating the Celery task.
-    """
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
-        row = await conn.fetchrow("SELECT task_id, status FROM reviews WHERE id = $1", review_id)
-        if not row:
-            raise HTTPException(status_code=404, detail="Review not found")
+async def cancel_review(review_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    stmt = select(PullRequest).where(PullRequest.id == uuid.UUID(review_id))
+    result = await db.execute(stmt)
+    pr = result.scalar_one_or_none()
+
+    if not pr:
+        raise HTTPException(status_code=404, detail="Review not found")
+    if pr.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
         
-        if row["status"] in ["complete", "failed", "cancelled"]:
-            return {"message": f"Review is already {row['status']}."}
-            
-        task_id = row.get("task_id")
-        if task_id:
-            from backend.tasks.celery_app import celery_app
-            logger.warning("Revoking and terminating Celery task", task_id=task_id, review_id=review_id)
-            celery_app.control.revoke(task_id, terminate=True)
-            
-        await conn.execute("UPDATE reviews SET status = 'cancelled', updated_at = NOW() WHERE id = $1", review_id)
+    if pr.status in ["complete", "failed", "cancelled"]:
+        return {"message": f"Review is already {pr.status}."}
         
-        # Add a log entry so the UI websocket knows it's cancelled
-        await conn.execute(
-            """
-            INSERT INTO review_logs (review_id, agent_name, status, message)
-            VALUES ($1, 'System', 'cancelled', 'Review was forcefully aborted by user.')
-            """,
-            review_id
-        )
+    if pr.task_id:
+        from backend.tasks.celery_app import celery_app
+        logger.warning("Revoking and terminating Celery task", task_id=pr.task_id, review_id=review_id)
+        celery_app.control.revoke(pr.task_id, terminate=True)
         
-        from backend.utils.pubsub import get_redis_client
-        client = get_redis_client()
-        client.publish(f"review:{review_id}:progress", "SYSTEM: Review aborted by user.")
-        
-        return {"message": "Review successfully cancelled."}
-    finally:
-        await conn.close()
+    pr.status = 'cancelled'
+    
+    log_entry = ReviewLog(
+        pull_request_id=uuid.UUID(review_id),
+        agent_name='System',
+        status='cancelled',
+        message='Review was forcefully aborted by user.'
+    )
+    db.add(log_entry)
+    await db.commit()
+    
+    from backend.utils.pubsub import get_redis_client
+    client = get_redis_client()
+    client.publish(f"review:{review_id}:progress", "SYSTEM: Review aborted by user.")
+    
+    return {"message": "Review successfully cancelled."}
 
 @router.get("/health")
 async def health_check():
-    """Simple health check endpoint for Docker."""
     return {"status": "healthy", "service": "aerp-api"}
 
-
 @router.get("/{review_id}/findings")
-async def get_review_findings(review_id: str, severity: str = None):
-    """
-    Fetch all agent findings for a completed review.
+async def get_review_findings(review_id: str, severity: str = None, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    pr_stmt = select(PullRequest).where(PullRequest.id == uuid.UUID(review_id))
+    pr = (await db.execute(pr_stmt)).scalar_one_or_none()
+    if not pr or pr.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    stmt = select(Comment).where(Comment.pull_request_id == uuid.UUID(review_id))
+    if severity:
+        stmt = stmt.where(Comment.severity == severity)
+        
+    severity_order = case(
+        (Comment.severity == 'critical', 1),
+        (Comment.severity == 'high', 2),
+        (Comment.severity == 'medium', 3),
+        (Comment.severity == 'low', 4),
+        else_=5
+    )
+    stmt = stmt.order_by(severity_order, desc(Comment.confidence))
+    
+    result = await db.execute(stmt)
+    comments = result.scalars().all()
 
-    Query params:
-      ?severity=critical   -> filter by severity level
-
-    WHY SEPARATE FROM /status?
-      /status is lightweight -- just the review row.
-      /findings can be large (many findings with full descriptions).
-      Separating them lets the UI load status fast, then lazily
-      fetch findings only when the user opens the detail view.
-    """
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
-        severity_order = """
-          CASE severity
-            WHEN 'critical' THEN 1
-            WHEN 'high'     THEN 2
-            WHEN 'medium'   THEN 3
-            WHEN 'low'      THEN 4
-            ELSE 5
-          END, confidence DESC
-        """
-        if severity:
-            rows = await conn.fetch(
-                f"""
-                SELECT id, agent, severity, confidence, title, description,
-                       file_path, line_number, evidence, suggested_fix, owasp_category,
-                       included_in_pr, created_at
-                FROM agent_findings
-                WHERE review_id = $1 AND severity = $2
-                ORDER BY {severity_order}
-                """,
-                review_id, severity,
-            )
-        else:
-            rows = await conn.fetch(
-                f"""
-                SELECT id, agent, severity, confidence, title, description,
-                       file_path, line_number, evidence, suggested_fix, owasp_category,
-                       included_in_pr, created_at
-                FROM agent_findings
-                WHERE review_id = $1
-                ORDER BY {severity_order}
-                """,
-                review_id,
-            )
-    finally:
-        await conn.close()
-
-    findings = [dict(r) for r in rows]
+    findings = [
+        {
+            "id": str(c.id),
+            "agent": c.agent,
+            "severity": c.severity,
+            "confidence": c.confidence,
+            "title": c.title,
+            "description": c.description,
+            "file_path": c.file_path,
+            "line_number": c.line_number,
+            "evidence": c.evidence,
+            "suggested_fix": c.suggested_fix,
+            "owasp_category": c.owasp_category,
+            "included_in_pr": c.is_posted_to_github,
+            "created_at": c.created_at.isoformat() if c.created_at else None
+        }
+        for c in comments
+    ]
     return {
         "review_id": review_id,
         "total": len(findings),
         "findings": findings,
     }
 
-
 @router.get("/{review_id}/logs")
-async def get_review_logs(review_id: str):
-    """
-    Fetch historical execution logs for a review.
-    Used by the UI to restore log state on refresh.
-    """
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
-        rows = await conn.fetch(
-            """
-            SELECT agent_name, status, message, created_at
-            FROM review_logs
-            WHERE review_id = $1
-            ORDER BY created_at ASC
-            """,
-            review_id,
-        )
-    finally:
-        await conn.close()
+async def get_review_logs(review_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    pr_stmt = select(PullRequest).where(PullRequest.id == uuid.UUID(review_id))
+    pr = (await db.execute(pr_stmt)).scalar_one_or_none()
+    if not pr or pr.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
         
-    return {"logs": [dict(r) for r in rows]}
+    stmt = select(ReviewLog).where(ReviewLog.pull_request_id == uuid.UUID(review_id)).order_by(ReviewLog.created_at)
+    result = await db.execute(stmt)
+    logs = result.scalars().all()
+    
+    return {"logs": [{"agent_name": l.agent_name, "status": l.status, "message": l.message, "created_at": l.created_at} for l in logs]}
 
 @router.get("")
-async def list_reviews(limit: int = 20):
-    """
-    List recent reviews for the homepage dashboard.
-    """
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
-        rows = await conn.fetch(
-            """
-            SELECT id, pr_url, status, risk_score, created_at, llm_provider, llm_model
-            FROM reviews
-            ORDER BY created_at DESC
-            LIMIT $1
-            """,
-            limit,
-        )
-    finally:
-        await conn.close()
-        
-    return {"reviews": [dict(r) for r in rows]}
-
-from pydantic import BaseModel
-from typing import Optional
+async def list_reviews(limit: int = 20, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    stmt = select(PullRequest).where(PullRequest.user_id == current_user.id).order_by(desc(PullRequest.created_at)).limit(limit)
+    result = await db.execute(stmt)
+    prs = result.scalars().all()
+    
+    return {"reviews": [{
+        "id": str(pr.id),
+        "pr_url": pr.pr_url,
+        "status": pr.status,
+        "risk_score": pr.risk_score,
+        "created_at": pr.created_at,
+        "llm_provider": pr.llm_provider,
+        "llm_model": pr.llm_model
+    } for pr in prs]}
 
 class PostFindingRequest(BaseModel):
     edited_message: Optional[str] = None
 
 @router.post("/{review_id}/findings/{finding_id}/post")
-async def post_finding_to_pr(review_id: str, finding_id: str, request: PostFindingRequest = None):
-    """
-    Posts a specific finding directly to the PR as a comment.
-    Accepts an optional edited_message.
-    """
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
+async def post_finding_to_pr(
+    review_id: str, 
+    finding_id: str, 
+    request: PostFindingRequest = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    pr_stmt = select(PullRequest).where(PullRequest.id == uuid.UUID(review_id))
+    pr = (await db.execute(pr_stmt)).scalar_one_or_none()
+    
+    if not pr or pr.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Review not found")
+        
+    comment_stmt = select(Comment).where(Comment.id == uuid.UUID(finding_id), Comment.pull_request_id == uuid.UUID(review_id))
+    finding = (await db.execute(comment_stmt)).scalar_one_or_none()
+    
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+        
+    if finding.is_posted_to_github:
+        return {"message": "Already posted"}
+        
+    from backend.db.models import ThirdPartyUserAccount, ThirdPartyIntegration
+    token_stmt = (
+        select(ThirdPartyUserAccount)
+        .join(ThirdPartyIntegration)
+        .where(ThirdPartyUserAccount.user_id == current_user.id, ThirdPartyIntegration.name == "github")
+    )
+    github_account = (await db.execute(token_stmt)).scalar_one_or_none()
+    if github_account and github_account.access_token_encrypted:
+        from backend.utils.encryption import decrypt_token
+        github_token = decrypt_token(github_account.access_token_encrypted)
+    else:
+        github_token = settings.github_token
+    
+    from backend.tools.github_tool import post_single_finding_comment
+    finding_dict = {
+        "title": finding.title,
+        "severity": finding.severity,
+        "description": finding.description,
+        "file_path": finding.file_path,
+        "evidence": finding.evidence,
+        "included_in_pr": finding.is_posted_to_github
+    }
+    if request and request.edited_message:
+        finding_dict["edited_message"] = request.edited_message
+        
     try:
-        # Get the review to find the PR URL
-        review = await conn.fetchrow("SELECT pr_url FROM reviews WHERE id = $1", review_id)
-        if not review:
-            raise HTTPException(status_code=404, detail="Review not found")
-            
-        # Get the specific finding
-        finding = await conn.fetchrow(
-            """
-            SELECT title, severity, description, file_path, evidence, included_in_pr 
-            FROM agent_findings 
-            WHERE id = $1 AND review_id = $2
-            """, 
-            finding_id, review_id
-        )
-        if not finding:
-            raise HTTPException(status_code=404, detail="Finding not found")
-            
-        if finding["included_in_pr"]:
-            return {"message": "Already posted"}
-            
-        # Call the GitHub tool
-        from backend.tools.github_tool import post_single_finding_comment
-        finding_dict = dict(finding)
-        if request and request.edited_message:
-            finding_dict["edited_message"] = request.edited_message
-        url = await post_single_finding_comment(review["pr_url"], finding_dict)
-        
-        # Mark as posted
-        await conn.execute("UPDATE agent_findings SET included_in_pr = TRUE WHERE id = $1", finding_id)
-        
-        return {"message": "Successfully posted", "url": url}
-    finally:
-        await conn.close()
+        url = await post_single_finding_comment(pr.pr_url, finding_dict, github_token)
+    except Exception as e:
+        logger.error("Failed to post finding", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to post finding")
+    
+    finding.is_posted_to_github = True
+    await db.commit()
+    
+    return {"message": "Successfully posted", "url": url}
 
-
-from pydantic import BaseModel
 class ApproveReviewRequest(BaseModel):
     comment: str = ""
 
 @router.post("/{review_id}/approve")
-async def approve_review(review_id: str, request: ApproveReviewRequest):
-    """
-    Resume a paused workflow (HITL) by explicitly approving it.
-    This routes the graph to the output node.
-    """
+async def approve_review(review_id: str, request: ApproveReviewRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    stmt = select(PullRequest).where(PullRequest.id == uuid.UUID(review_id))
+    pr = (await db.execute(stmt)).scalar_one_or_none()
+    
+    if not pr or pr.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Review not found")
+        
+    pr.status = 'resuming'
+    await db.commit()
+        
+    from backend.db.models import ThirdPartyUserAccount, ThirdPartyIntegration
+    token_stmt = (
+        select(ThirdPartyUserAccount)
+        .join(ThirdPartyIntegration)
+        .where(ThirdPartyUserAccount.user_id == current_user.id, ThirdPartyIntegration.name == "github")
+    )
+    github_account = (await db.execute(token_stmt)).scalar_one_or_none()
+    
+    github_token = None
+    if github_account and github_account.access_token_encrypted:
+        from backend.utils.encryption import decrypt_token
+        github_token = decrypt_token(github_account.access_token_encrypted)
+        
     from backend.graph.workflow import create_workflow
     from langgraph.checkpoint.redis import AsyncRedisSaver
-    
-    # Update DB status
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
-        await conn.execute(
-            "UPDATE reviews SET status=$1, updated_at=NOW() WHERE id=$2",
-            "resuming", review_id,
-        )
-    finally:
-        await conn.close()
-        
-    config = {"configurable": {"thread_id": review_id}}
+    config = {"configurable": {"thread_id": review_id, "github_token": github_token}}
     
     try:
         async with AsyncRedisSaver.from_conn_string(settings.redis_url) as checkpointer:
@@ -383,7 +329,6 @@ async def approve_review(review_id: str, request: ApproveReviewRequest):
             if not state.next:
                 raise HTTPException(status_code=400, detail="Workflow is not paused.")
                 
-            # Resume execution
             final_state = await wf.ainvoke(None, config=config)
             
             consensus_result = final_state.get("consensus_result") or {}
@@ -395,17 +340,12 @@ async def approve_review(review_id: str, request: ApproveReviewRequest):
         logger.error("Failed to resume workflow", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to resume workflow.")
         
-    # Update status to complete
-    conn = await asyncpg.connect(conn_string)
-    try:
-        await conn.execute(
-            "UPDATE reviews SET status=$1, updated_at=NOW(), completed_at=NOW(), risk_score=$2, recommendation=$3 WHERE id=$4",
-            "complete", risk_score, recommendation, review_id,
-        )
-    finally:
-        await conn.close()
+    pr.status = 'complete'
+    pr.risk_score = risk_score
+    pr.recommendation = recommendation
+    pr.completed_at = datetime.now(timezone.utc)
+    await db.commit()
         
-    # Trigger Phase 7 Documentation and Test Agent generation
     from backend.tasks.review_tasks import generate_artifacts_task
     generate_artifacts_task.delay(review_id)
     
@@ -416,10 +356,6 @@ import asyncio
 
 @router.websocket("/{review_id}/ws")
 async def review_progress_ws(websocket: WebSocket, review_id: str):
-    """
-    WebSocket endpoint to stream real-time execution progress of the agents
-    for a specific review.
-    """
     await websocket.accept()
     from backend.utils.pubsub import get_redis_client
     client = get_redis_client()
@@ -429,7 +365,6 @@ async def review_progress_ws(websocket: WebSocket, review_id: str):
     try:
         await pubsub.subscribe(channel)
         while True:
-            # timeout=1.0 ensures we don't block forever if the client disconnects
             message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if message:
                 await websocket.send_text(message["data"])

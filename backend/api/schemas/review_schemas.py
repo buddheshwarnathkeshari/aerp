@@ -18,6 +18,7 @@ WHY SEPARATE SCHEMAS FROM DB MODELS?
 from pydantic import BaseModel, HttpUrl, field_validator
 from typing import Optional
 from datetime import datetime
+from uuid import UUID
 
 
 # ── Request schemas (what clients send to us) ─────────────────────────────────
@@ -59,7 +60,7 @@ class HumanDecisionRequest(BaseModel):
 
 class StartReviewResponse(BaseModel):
     """Response for POST /reviews/start"""
-    review_id: str
+    review_id: UUID
     status: str             # "queued"
     message: str            # Human-readable message
     status_url: str         # URL to poll for status
@@ -67,7 +68,7 @@ class StartReviewResponse(BaseModel):
 
 class ReviewStatusResponse(BaseModel):
     """Response for GET /reviews/{id}/status"""
-    review_id: str
+    review_id: UUID
     status: str
     # Status progression:
     # queued → collecting → analyzing → reviewing → consensus →

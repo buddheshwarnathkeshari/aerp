@@ -34,12 +34,25 @@ settings = get_settings()
 # WHY echo=False in production?
 # echo=True logs every SQL query. Great for debugging. Terrible for production
 # (logs fill up fast, sensitive data exposed).
+import sys
+from sqlalchemy.pool import NullPool
+
+is_celery = "celery" in sys.argv[0] or any("celery" in arg for arg in sys.argv)
+
+engine_kwargs = {
+    "echo": settings.is_development,
+    "pool_pre_ping": True,
+}
+
+if is_celery:
+    engine_kwargs["poolclass"] = NullPool
+else:
+    engine_kwargs["pool_size"] = 10
+    engine_kwargs["max_overflow"] = 20
+
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.is_development,   # Log SQL in dev, not in prod
-    pool_size=10,                    # Keep 10 connections open
-    max_overflow=20,                 # Allow 20 extra connections at peak
-    pool_pre_ping=True,             # Test connection health before using
+    **engine_kwargs
 )
 
 # ── Session Factory ───────────────────────────────────────────────────────────

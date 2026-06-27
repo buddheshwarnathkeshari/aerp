@@ -24,6 +24,7 @@ WHAT IS A LANGCHAIN TOOL?
 
 from github import Github, GithubException
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 from backend.config.settings import get_settings
 import structlog
 
@@ -31,9 +32,9 @@ logger = structlog.get_logger()
 settings = get_settings()
 
 
-def get_github_client() -> Github:
+def get_github_client(token: str) -> Github:
     """Returns an authenticated GitHub client."""
-    return Github(settings.github_token)
+    return Github(token)
 
 
 def parse_pr_url(pr_url: str) -> tuple[str, str, int]:
@@ -53,7 +54,7 @@ def parse_pr_url(pr_url: str) -> tuple[str, str, int]:
     return owner, repo_name, pr_number
 
 
-async def fetch_pr_data(pr_url: str) -> dict:
+async def fetch_pr_data(pr_url: str, github_token: str) -> dict:
     """
     Fetches complete PR data from GitHub.
     This is called by the context_collector_node (not an LLM tool).
@@ -77,7 +78,7 @@ async def fetch_pr_data(pr_url: str) -> dict:
             "commit_messages": ["Initial commit"],
         }
 
-    gh = get_github_client()
+    gh = get_github_client(github_token)
     repo = gh.get_repo(f"{owner}/{repo_name}")
     pr = repo.get_pull(pr_number)
 
@@ -91,7 +92,7 @@ async def fetch_pr_data(pr_url: str) -> dict:
     async with httpx.AsyncClient(follow_redirects=True) as client:
         response = await client.get(
             pr.diff_url,
-            headers={"Authorization": f"token {settings.github_token}"},
+            headers={"Authorization": f"token {github_token}"},
         )
         diff = response.text
 
@@ -114,7 +115,7 @@ async def fetch_pr_data(pr_url: str) -> dict:
     }
 
 
-async def post_pr_comments(pr_url: str, findings: list) -> str:
+async def post_pr_comments(pr_url: str, findings: list, github_token: str) -> str:
     """
     Posts the final review findings as a general issue comment on the PR.
     """
@@ -124,7 +125,7 @@ async def post_pr_comments(pr_url: str, findings: list) -> str:
     if owner == "fake":
         logger.info("Mock PR detected. Skipping actual GitHub API call.")
         return "https://github.com/fake/repo/pull/1#issuecomment-fake"
-    gh = get_github_client()
+    gh = get_github_client(github_token)
     repo = gh.get_repo(f"{owner}/{repo_name}")
     pr = repo.get_pull(pr_number)
 
@@ -154,7 +155,7 @@ async def post_pr_comments(pr_url: str, findings: list) -> str:
         logger.error("Failed to post comment", error=str(e))
         return f"Error: {e.data}"
 
-async def post_single_finding_comment(pr_url: str, finding: dict) -> str:
+async def post_single_finding_comment(pr_url: str, finding: dict, github_token: str) -> str:
     """
     Posts a single review finding to the PR.
     Attempts an inline review comment if file_path and line_number are available.
@@ -167,7 +168,7 @@ async def post_single_finding_comment(pr_url: str, finding: dict) -> str:
         logger.info("Mock PR detected. Skipping actual GitHub API call.")
         return "https://github.com/fake/repo/pull/1#issuecomment-fake"
     
-    gh = get_github_client()
+    gh = get_github_client(github_token)
     repo = gh.get_repo(f"{owner}/{repo_name}")
     pr = repo.get_pull(pr_number)
 
@@ -221,14 +222,14 @@ async def post_single_finding_comment(pr_url: str, finding: dict) -> str:
         logger.error("Failed to post comment", error=str(e))
         return f"Error: {e.data}"
 
-async def get_file_content(repo_owner: str, repo_name: str, file_path: str, branch: str) -> str:
+async def get_file_content(repo_owner: str, repo_name: str, file_path: str, branch: str, github_token: str) -> str:
     """
     Fetches the raw content of a specific file from a GitHub repository.
     """
     if repo_owner == "fake":
         return f"# Mock content for {file_path}\ndef mock_func():\n    pass\n"
         
-    gh = get_github_client()
+    gh = get_github_client(github_token)
     try:
         repo = gh.get_repo(f"{repo_owner}/{repo_name}")
         contents = repo.get_contents(file_path, ref=branch)
@@ -238,7 +239,7 @@ async def get_file_content(repo_owner: str, repo_name: str, file_path: str, bran
         logger.error("Failed to fetch file content", file_path=file_path, error=str(e))
         return ""
 
-async def create_pull_request(repo_owner: str, repo_name: str, branch_name: str, base_branch: str, title: str, body: str, files: dict) -> str:
+async def create_pull_request(repo_owner: str, repo_name: str, branch_name: str, base_branch: str, title: str, body: str, files: dict, github_token: str) -> str:
     """
     Creates a new branch, commits the given files, and opens a Pull Request.
     `files` is a dict of {filepath: content}
@@ -248,7 +249,7 @@ async def create_pull_request(repo_owner: str, repo_name: str, branch_name: str,
         logger.info("Mock PR detected. Skipping actual GitHub API call for PR creation.")
         return f"https://github.com/fake/repo/pull/999"
         
-    gh = get_github_client()
+    gh = get_github_client(github_token)
     try:
         repo = gh.get_repo(f"{repo_owner}/{repo_name}")
         
@@ -284,7 +285,7 @@ async def create_pull_request(repo_owner: str, repo_name: str, branch_name: str,
 # These tools are given to agents so they can fetch specific data on demand.
 
 @tool
-def github_get_file_content(owner: str, repo: str, file_path: str, ref: str = "main") -> str:
+def github_get_file_content(owner: str, repo: str, file_path: str, ref: str = "main", *, config: RunnableConfig = None) -> str:
     """
     Fetch the full content of a specific file from a GitHub repository.
     Use when you need to see the complete file, not just the diff.
@@ -299,7 +300,8 @@ def github_get_file_content(owner: str, repo: str, file_path: str, ref: str = "m
         File content as a string, or error message.
     """
     try:
-        gh = get_github_client()
+        token = config["configurable"].get("github_token") if config else None
+        gh = get_github_client(token)
         repository = gh.get_repo(f"{owner}/{repo}")
         file_content = repository.get_contents(file_path, ref=ref)
         return file_content.decoded_content.decode("utf-8")
@@ -308,7 +310,7 @@ def github_get_file_content(owner: str, repo: str, file_path: str, ref: str = "m
 
 
 @tool
-def github_search_code(owner: str, repo: str, query: str) -> str:
+def github_search_code(owner: str, repo: str, query: str, *, config: RunnableConfig = None) -> str:
     """
     Search for code patterns across a GitHub repository.
     Use to find usages of a function, class, or pattern across the codebase.
@@ -322,7 +324,8 @@ def github_search_code(owner: str, repo: str, query: str) -> str:
         List of files containing the search term with snippets.
     """
     try:
-        gh = get_github_client()
+        token = config["configurable"].get("github_token") if config else None
+        gh = get_github_client(token)
         results = gh.search_code(f"{query} repo:{owner}/{repo}")
         items = list(results[:10])  # Limit to 10 results
         if not items:
@@ -345,6 +348,8 @@ def github_post_pr_comment(
     commit_id: str,
     path: str,
     position: int,
+    *,
+    config: RunnableConfig = None
 ) -> str:
     """
     Post a review comment on a specific line of the GitHub PR.
@@ -363,7 +368,8 @@ def github_post_pr_comment(
         Comment URL or error message.
     """
     try:
-        gh = get_github_client()
+        token = config["configurable"].get("github_token") if config else None
+        gh = get_github_client(token)
         repository = gh.get_repo(f"{owner}/{repo}")
         pr = repository.get_pull(pr_number)
         commit = repository.get_commit(commit_id)

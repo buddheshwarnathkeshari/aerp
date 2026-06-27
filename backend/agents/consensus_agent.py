@@ -4,7 +4,7 @@ import time
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from backend.models.findings import ConsensusReport
+from backend.schemas.findings import ConsensusReport
 from backend.prompts.consensus import SYSTEM_PROMPT, build_human_message
 from backend.config.settings import get_settings
 import structlog
@@ -55,7 +55,7 @@ class ConsensusAgent:
 
             import os
             if os.environ.get("MOCK_LLM") == "1":
-                from backend.models.findings import CodeFinding, Severity, Recommendation
+                from backend.schemas.findings import CodeFinding, Severity, Recommendation
                 report = ConsensusReport(
                     final_findings=[
                         CodeFinding(
@@ -90,7 +90,7 @@ class ConsensusAgent:
                         )
                         
                 if report is None:
-                    from backend.models.findings import Recommendation
+                    from backend.schemas.findings import Recommendation
                     report = ConsensusReport(
                         final_findings=[],
                         risk_score=0,
@@ -101,7 +101,7 @@ class ConsensusAgent:
 
             # Strict Policy: If risk score triggers HITL (>40), always REQUEST_CHANGES
             if report.risk_score > 40:
-                from backend.models.findings import Recommendation
+                from backend.schemas.findings import Recommendation
                 report.recommendation = Recommendation.REQUEST_CHANGES
 
             elapsed = round(time.time() - start_time, 2)

@@ -11,26 +11,24 @@ THE ASYNC BRIDGE PROBLEM:
 SOLUTION: asyncio.run()
   asyncio.run() creates a new event loop, runs the async function to
   completion, and returns the result — bridging sync Celery with async LangGraph.
-
-INTERVIEW: "How do you run async code in a synchronous context?"
-  Use asyncio.run() to create a new event loop and run until complete.
-  Alternative: asyncio.get_event_loop().run_until_complete() (deprecated in 3.10+)
-  In production, prefer dedicated async workers (e.g., Celery with gevent or
-  eventlet) for heavy async workloads.
 """
 
 import asyncio
-import asyncpg
+import uuid
 import json
+import os
+from datetime import datetime, timezone
 from backend.tasks.celery_app import celery_app
 from backend.graph.state import create_initial_state
 from backend.graph.workflow import workflow
 from backend.config.settings import get_settings
+from backend.db.session import AsyncSessionLocal
+from backend.db.models import PullRequest, Comment, ThirdPartyUserAccount, ThirdPartyIntegration
+from sqlalchemy import select, update
 import structlog
 
 logger = structlog.get_logger()
 settings = get_settings()
-
 
 @celery_app.task(
     bind=True,                  # `self` = the task instance (for retry/status)
@@ -40,14 +38,37 @@ settings = get_settings()
     soft_time_limit=600,        # Warn at 10 minutes
     time_limit=900,             # Hard kill at 15 minutes
 )
-def run_review_task(self, review_id: str, pr_url: str, jira_url: str = None, doc_url: str = None):
+def run_review_task(self, review_id: str, pr_url: str, jira_url: str = None, doc_url: str = None, user_id: str = None):
     """
     Celery task that runs the complete AERP review workflow.
-
-    Called by FastAPI when a review is submitted.
-    Runs asynchronously in a worker process.
     """
-    logger.info("Review task started", review_id=review_id, task_id=self.request.id)
+    logger.info("Review task started", review_id=review_id, task_id=self.request.id, user_id=user_id)
+
+    # Setup environment with user's github token if available
+    async def _setup_env():
+        if user_id:
+            from backend.utils.encryption import decrypt_token
+            async with AsyncSessionLocal() as session:
+                stmt = (
+                    select(ThirdPartyUserAccount)
+                    .join(ThirdPartyIntegration)
+                    .where(
+                        ThirdPartyUserAccount.user_id == uuid.UUID(user_id), 
+                        ThirdPartyIntegration.name == "github"
+                    )
+                )
+                result = await session.execute(stmt)
+                account = result.scalar_one_or_none()
+                if account and account.access_token_encrypted:
+                    return decrypt_token(account.access_token_encrypted)
+        return None
+
+    github_token = asyncio.run(_setup_env())
+    if not github_token:
+        error_msg = "GitHub Connector not configured. Please add your Personal Access Token in the Connectors settings."
+        logger.error(error_msg, review_id=review_id)
+        asyncio.run(_update_review_status(review_id, "failed", error=error_msg))
+        return {"status": "failed", "error": error_msg}
 
     # Update review status in DB
     asyncio.run(_update_review_status(review_id, "collecting"))
@@ -66,7 +87,7 @@ def run_review_task(self, review_id: str, pr_url: str, jira_url: str = None, doc
             from backend.graph.workflow import create_workflow
             from langgraph.checkpoint.redis import AsyncRedisSaver
             
-            config = {"configurable": {"thread_id": review_id}}
+            config = {"configurable": {"thread_id": review_id, "github_token": github_token}}
             async with AsyncRedisSaver.from_conn_string(settings.redis_url) as checkpointer:
                 wf = create_workflow(checkpointer)
                 await wf.ainvoke(initial_state, config=config)
@@ -144,101 +165,65 @@ def run_review_task(self, review_id: str, pr_url: str, jira_url: str = None, doc
 
 
 def _compute_risk_score(findings: list) -> int:
-    """
-    Computes a 0-100 risk score from agent findings.
-
-    WHY THIS FORMULA?
-      Each severity level is weighted by impact:
-        critical = 25 points  (one critical = 25% risk)
-        high     = 10 points
-        medium   =  3 points
-        low      =  1 point
-
-      Capped at 100. Score > 40 triggers Human-in-the-Loop in Phase 6.
-
-    INTERVIEW: "How do you quantify code risk?"
-      "We use a weighted severity scoring system. Critical findings contribute
-      25 points each, high 10 points, medium 3 points, low 1 point.
-      Scores above 40 trigger human review before the PR can merge."
-    """
     weights = {"critical": 25, "high": 10, "medium": 3, "low": 1, "info": 0}
     score = sum(weights.get(f.get("severity", "info"), 0) for f in findings)
     return min(score, 100)
 
 
 async def _persist_findings(review_id: str, findings: list):
-    """Saves all agent findings to the agent_findings table."""
+    """Saves all agent findings to the comments table."""
     if not findings:
         return
 
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
+    async with AsyncSessionLocal() as session:
         for f in findings:
-            await conn.execute(
-                """
-                INSERT INTO agent_findings
-                  (review_id, agent, severity, confidence, title, description,
-                   file_path, line_number, evidence, suggested_fix, owasp_category)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                """,
-                review_id,
-                f.get("agent", "unknown"),
-                f.get("severity", "info"),
-                float(f.get("confidence", 0.0)),
-                f.get("title", ""),
-                f.get("description", ""),
-                f.get("file_path"),
-                f.get("line_number"),
-                f.get("evidence", ""),
-                f.get("suggested_fix"),
-                f.get("owasp_category"),
+            new_comment = Comment(
+                pull_request_id=uuid.UUID(review_id),
+                agent=f.get("agent", "unknown"),
+                severity=f.get("severity", "info"),
+                confidence=float(f.get("confidence", 0.0)),
+                title=f.get("title", "Missing title")[:255],
+                description=f.get("description", ""),
+                file_path=f.get("file_path"),
+                line_number=f.get("line_number"),
+                evidence=f.get("evidence", ""),
+                suggested_fix=f.get("suggested_fix"),
+                owasp_category=f.get("owasp_category"),
             )
+            session.add(new_comment)
+        await session.commit()
         logger.info("Findings persisted", review_id=review_id, count=len(findings))
-    finally:
-        await conn.close()
 
 
 async def _update_review_status(review_id: str, status: str, error: str = None, risk_score: int = None):
     """Updates the review status in PostgreSQL."""
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
-        if error:
-            await conn.execute(
-                "UPDATE reviews SET status=$1, error=$2, updated_at=NOW() WHERE id=$3",
-                status, error, review_id,
-            )
-        elif risk_score is not None:
-            await conn.execute(
-                "UPDATE reviews SET status=$1, risk_score=$2, updated_at=NOW() WHERE id=$3",
-                status, risk_score, review_id,
-            )
-        else:
-            await conn.execute(
-                "UPDATE reviews SET status=$1, updated_at=NOW() WHERE id=$2",
-                status, review_id,
-            )
-    finally:
-        await conn.close()
+    async with AsyncSessionLocal() as session:
+        stmt = select(PullRequest).where(PullRequest.id == uuid.UUID(review_id))
+        result = await session.execute(stmt)
+        pr = result.scalar_one_or_none()
+        if pr:
+            pr.status = status
+            pr.updated_at = datetime.now(timezone.utc)
+            if error:
+                pr.error = error
+            if risk_score is not None:
+                pr.risk_score = risk_score
+            await session.commit()
 
 
 async def _update_review_complete(review_id: str, risk_score: int, recommendation: str):
     """Marks a review complete with final risk score and recommendation."""
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(conn_string)
-    try:
-        await conn.execute(
-            """
-            UPDATE reviews
-            SET status='complete', risk_score=$1, recommendation=$2,
-                completed_at=NOW(), updated_at=NOW()
-            WHERE id=$3
-            """,
-            risk_score, recommendation, review_id,
-        )
-    finally:
-        await conn.close()
+    async with AsyncSessionLocal() as session:
+        stmt = select(PullRequest).where(PullRequest.id == uuid.UUID(review_id))
+        result = await session.execute(stmt)
+        pr = result.scalar_one_or_none()
+        if pr:
+            pr.status = 'complete'
+            pr.risk_score = risk_score
+            pr.recommendation = recommendation
+            pr.completed_at = datetime.now(timezone.utc)
+            pr.updated_at = datetime.now(timezone.utc)
+            await session.commit()
 
 @celery_app.task(bind=True, name="aerp.generate_artifacts", max_retries=3, soft_time_limit=300)
 def generate_artifacts_task(self, review_id: str):
@@ -248,14 +233,39 @@ def generate_artifacts_task(self, review_id: str):
     """
     logger.info("Generating artifacts for approved review", review_id=review_id)
     
+    async def _get_github_token():
+        # Setup env with user token if applicable
+        async with AsyncSessionLocal() as session:
+            pr_stmt = select(PullRequest).where(PullRequest.id == uuid.UUID(review_id))
+            pr_result = await session.execute(pr_stmt)
+            pr = pr_result.scalar_one_or_none()
+            if pr and pr.user_id:
+                token_stmt = (
+                    select(ThirdPartyUserAccount)
+                    .join(ThirdPartyIntegration)
+                    .where(
+                        ThirdPartyUserAccount.user_id == pr.user_id, 
+                        ThirdPartyIntegration.name == "github"
+                    )
+                )
+                account = (await session.execute(token_stmt)).scalar_one_or_none()
+                if account and account.access_token_encrypted:
+                    from backend.utils.encryption import decrypt_token
+                    return decrypt_token(account.access_token_encrypted)
+                else:
+                    raise Exception("GitHub Connector not configured. Cannot generate artifacts.")
+        return None
+
     async def _run_agents():
+        github_token = await _get_github_token()
+
         from backend.agents.documentation_agent import generate_documentation
         from backend.agents.test_agent import generate_tests
         from backend.tools.github_tool import create_pull_request
         from langgraph.checkpoint.redis import AsyncRedisSaver
         from backend.graph.workflow import create_workflow
         
-        config = {"configurable": {"thread_id": review_id}}
+        config = {"configurable": {"thread_id": review_id, "github_token": github_token}}
         async with AsyncRedisSaver.from_conn_string(settings.redis_url) as checkpointer:
             wf = create_workflow(checkpointer)
             state_snapshot = await wf.aget_state(config)
@@ -287,7 +297,8 @@ def generate_artifacts_task(self, review_id: str):
                 repo_owner, repo_name, doc_branch, base_branch,
                 title="AERP Auto-Generated Documentation Updates",
                 body="Inline documentation and README updates generated based on approved PR.",
-                files=doc_files
+                files=doc_files,
+                github_token=github_token
             )
         
         # Create Test PR
@@ -297,7 +308,8 @@ def generate_artifacts_task(self, review_id: str):
             repo_owner, repo_name, test_branch, base_branch,
             title="AERP Auto-Generated Tests",
             body="Tests generated based on approved review changes.",
-            files=test_files
+            files=test_files,
+            github_token=github_token
         )
         
         logger.info("Artifact PRs created successfully", review_id=review_id)

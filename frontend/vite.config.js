@@ -9,9 +9,13 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/reviews': {
-        target: 'http://host.docker.internal:8000',
+        target: 'http://api:8000',
         changeOrigin: true,
         ws: true,
+      },
+      '/api': {
+        target: 'http://api:8000',
+        changeOrigin: true,
       }
     }
   }

@@ -11,7 +11,10 @@ from contextlib import asynccontextmanager
 import asyncpg
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from backend.api.routes.reviews import router as reviews_router
+from backend.api.routes.auth import router as auth_router
+from backend.api.routes.integrations import router as integrations_router
 from backend.config.settings import get_settings
 import structlog
 
@@ -77,8 +80,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.secret_key or "super_secret_session_key",
+    max_age=3600 # 1 hour is plenty for OAuth flows
+)
+
 # ── Register routes ───────────────────────────────────────────────────────────
 app.include_router(reviews_router)
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(integrations_router, prefix="/api/v1")
 
 
 @app.get("/", tags=["root"])

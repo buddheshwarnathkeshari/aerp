@@ -33,6 +33,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
+
 from backend.graph.state import ReviewState, PRMetadata, JiraTicket
 from backend.tools.github_tool import fetch_pr_data
 from backend.tools.jira_tool import fetch_jira_ticket
@@ -71,7 +73,7 @@ settings = get_settings()
 # NODE 1: Context Collector
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def context_collector_node(state: ReviewState) -> dict:
+async def context_collector_node(state: ReviewState, config: RunnableConfig) -> dict:
     """
     Fetches all external context needed for the review.
 
@@ -104,11 +106,13 @@ async def context_collector_node(state: ReviewState) -> dict:
     result = {
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
+    
+    github_token = config["configurable"].get("github_token")
 
     # ── Step 1: Fetch GitHub PR (MANDATORY) ───────────────────────────────────
     try:
         logger.info("Fetching GitHub PR", url=state["pr_url"])
-        pr_data = await fetch_pr_data(state["pr_url"])
+        pr_data = await fetch_pr_data(state["pr_url"], github_token)
         result["pr_metadata"] = pr_data
         logger.info(
             "GitHub PR fetched",
@@ -439,7 +443,7 @@ async def hitl_node(state: ReviewState) -> dict:
     return {"hitl_required": True}
 
 
-async def output_node(state: ReviewState) -> dict:
+async def output_node(state: ReviewState, config: RunnableConfig) -> dict:
     """
     Posts the final review findings to the GitHub PR.
     Runs after Consensus (if auto-approved) or after HITL (if manually approved).
@@ -448,10 +452,11 @@ async def output_node(state: ReviewState) -> dict:
     
     consensus = state.get("consensus_result", {})
     findings = consensus.get("final_findings", [])
+    github_token = config["configurable"].get("github_token")
     
     try:
         from backend.tools.github_tool import post_pr_comments
-        comment_url = await post_pr_comments(state["pr_url"], findings)
+        comment_url = await post_pr_comments(state["pr_url"], findings, github_token)
         logger.info("Successfully posted to GitHub", url=comment_url)
     except Exception as e:
         logger.error("Failed to post comments to GitHub", error=str(e))
@@ -572,13 +577,14 @@ async def _fetch_google_doc(doc_url: str) -> str:
 
     try:
         from googleapiclient.discovery import build
-        from google.oauth2 import service_account
-
-        credentials = service_account.Credentials.from_service_account_file(
-            settings.google_service_account_file,
-            scopes=["https://www.googleapis.com/auth/documents.readonly"],
-        )
-        service = build("docs", "v1", credentials=credentials)
+        # TODO: Retrieve the Google access_token from ThirdPartyUserAccount using state['user_id']
+        # For now, we mock or raise because service accounts are no longer supported.
+        raise NotImplementedError("Google Docs via OAuth token is not yet fully implemented in graph nodes.")
+        
+        # When implemented, use:
+        # from google.oauth2.credentials import Credentials
+        # credentials = Credentials(token=user_access_token)
+        # service = build("docs", "v1", credentials=credentials)
         doc = service.documents().get(documentId=doc_id).execute()
 
         content_parts = []

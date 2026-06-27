@@ -13,6 +13,7 @@ RESILIENCE:
 """
 
 import asyncpg
+import uuid
 from backend.rag.chunker import DocumentChunk
 from backend.rag.embedder import get_embedder
 from backend.config.settings import get_settings
@@ -89,9 +90,10 @@ async def index_chunks(
             for chunk, embedding in zip(batch, embeddings):
                 await conn.execute(
                     """
-                    INSERT INTO embeddings (review_id, source, content, metadata, embedding)
-                    VALUES ($1, $2, $3, $4::jsonb, $5::vector)
+                    INSERT INTO embeddings (id, pull_request_id, source, content, metadata, embedding)
+                    VALUES ($1, $2, $3, $4, $5::jsonb, $6::vector)
                     """,
+                    uuid.uuid4(),
                     review_id,
                     chunk.source,
                     chunk.content,

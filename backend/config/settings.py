@@ -72,8 +72,24 @@ class Settings(BaseSettings):
     jira_email: str
     jira_api_token: str
 
-    # ── Google Docs Settings ──────────────────────────────────────────────────
-    google_service_account_file: str = "./credentials/google_service_account.json"
+    # ── JWT Auth Settings ─────────────────────────────────────────────────────
+    secret_key: str = "changeme_in_production"
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
+
+    # ── OAuth Client Settings ─────────────────────────────────────────────────
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    
+    jira_client_id: str = ""
+    jira_client_secret: str = ""
+    
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
+    # ── Google Docs Settings (Now using OAuth) ────────────────────────────────
+    # We no longer use a service account key file. User connects via OAuth in UI.
 
     # ── App Settings ──────────────────────────────────────────────────────────
     app_env: str = "development"

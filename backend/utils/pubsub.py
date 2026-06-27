@@ -1,4 +1,5 @@
 import json
+import uuid
 import redis.asyncio as redis
 from backend.config.settings import get_settings
 
@@ -43,8 +44,8 @@ async def publish_agent_status(review_id: str, agent: str, status: str, message:
     try:
         conn = await asyncpg.connect(conn_string)
         await conn.execute(
-            "INSERT INTO review_logs (review_id, agent_name, status, message) VALUES ($1, $2, $3, $4)",
-            review_id, agent, status, message
+            "INSERT INTO review_logs (id, pull_request_id, agent_name, status, message) VALUES ($1, $2, $3, $4, $5)",
+            uuid.uuid4(), review_id, agent, status, message
         )
         await conn.close()
     except Exception as e:
