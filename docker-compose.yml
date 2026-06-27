@@ -117,6 +117,7 @@ services:
       - MIN_CONFIDENCE_FOR_PR_COMMENT=${MIN_CONFIDENCE_FOR_PR_COMMENT}
       - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS}
       - HITL_RISK_THRESHOLD=${HITL_RISK_THRESHOLD}
+      - MOCK_LLM=${MOCK_LLM}
     volumes:
       - ./backend:/app/backend
       - ./credentials:/app/credentials

@@ -79,11 +79,11 @@ def run_review_task(self, review_id: str, pr_url: str, jira_url: str = None, doc
         if agent_findings:
             asyncio.run(_persist_findings(review_id, agent_findings))
 
-        # Build summary for the review row
-        code_review_result = final_state.get("code_review_result") or {}
-        recommendation = code_review_result.get("recommendation", "approve_with_comments")
-        findings_count = len(agent_findings)
-        risk_score = _compute_risk_score(agent_findings)
+        # Build summary for the review row from Consensus Agent if available
+        consensus_result = final_state.get("consensus_result") or {}
+        recommendation = consensus_result.get("recommendation", "approve_with_comments")
+        findings_count = len(consensus_result.get("findings", agent_findings))
+        risk_score = consensus_result.get("risk_score", _compute_risk_score(agent_findings))
 
         # Update review to complete with risk score and recommendation
         asyncio.run(_update_review_complete(review_id, risk_score, recommendation))

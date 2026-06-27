@@ -224,11 +224,31 @@ class BaseAgent(ABC):
             if tool_results:
                 enriched_human += "\n\n## Additional Context from Search\n" + "\n\n".join(tool_results)
 
-            # Final call: get structured AgentReport
-            report: AgentReport = await llm.ainvoke([
-                SystemMessage(content=self.system_prompt),
-                HumanMessage(content=enriched_human),
-            ])
+            import os
+            if os.environ.get("MOCK_LLM") == "1":
+                from backend.models.findings import CodeFinding, Severity, Recommendation
+                report = AgentReport(
+                    findings=[
+                        CodeFinding(
+                            title=f"Mock finding from {self.agent_name}",
+                            severity=Severity.HIGH,
+                            confidence=0.9,
+                            description="This is a mock finding generated because MOCK_LLM=1.",
+                            evidence="Mock evidence",
+                            file_path="src/main.py",
+                            line_number=42,
+                        )
+                    ],
+                    overall_assessment=f"Mock assessment from {self.agent_name}",
+                    recommendation=Recommendation.REQUEST_CHANGES,
+                    confidence=0.9,
+                )
+            else:
+                # Final call: get structured AgentReport
+                report: AgentReport = await llm.ainvoke([
+                    SystemMessage(content=self.system_prompt),
+                    HumanMessage(content=enriched_human),
+                ])
 
             elapsed = round(time.time() - start_time, 2)
             logger.info(

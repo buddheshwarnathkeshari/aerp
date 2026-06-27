@@ -343,6 +343,17 @@ async def blast_radius_node(state: ReviewState) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PHASE 5 NODE: Consensus Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def consensus_node(state: ReviewState) -> dict:
+    """Runs the Consensus Agent to unify all findings and compute final risk score."""
+    from backend.agents.consensus_agent import consensus_agent
+    logger.info("Running Consensus Agent", review_id=state["review_id"])
+    return await consensus_agent.run(state=state)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helper: Empty agent result (used when PR metadata is missing)
 # ─────────────────────────────────────────────────────────────────────────────
 
