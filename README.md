@@ -3,8 +3,10 @@
 ![AERP Dashboard](docs/assets/StartCodeReview.png)
 
 ## 🎥 Live Demo
-https://github.com/buddheshwarnathkeshari/aerp/raw/main/docs/assets/Demo.mp4
-<br/>
+
+<video src="https://github.com/buddheshwarnathkeshari/aerp/raw/main/docs/assets/Demo.mp4" controls="controls" width="100%"></video>
+
+
 
 ## 🚀 What it does
 AERP is an advanced, AI-powered Autonomous Engineering Review Platform designed to revolutionize the code review process. It acts as a hyper-intelligent, multi-agent code reviewer that automatically analyzes GitHub pull requests against Jira requirements, architectural guidelines, security standards, and performance metrics. 
