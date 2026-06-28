@@ -41,17 +41,8 @@ class CodeReviewAgent(BaseAgent):
     - Database schema issues (DatabaseAgent)
     """
 
-    @property
-    def system_prompt(self) -> str:
-        return SYSTEM_PROMPT
-
-    @property
-    def result_key(self) -> str:
-        return "code_review_result"
-
-    @property
-    def agent_name(self) -> str:
-        return "code_review_agent"
+    SYSTEM_PROMPT = SYSTEM_PROMPT
+    AGENT_NAME = "code_review_agent"
 
 
 # Module-level singleton — instantiated once, reused for every review

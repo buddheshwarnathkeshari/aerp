@@ -7,10 +7,10 @@ const SettingsLayout = () => {
   const currentPath = location.pathname;
 
   return (
-    <div className="flex animate-fade-in" style={{ gap: '2rem', alignItems: 'flex-start', width: '100%' }}>
+    <div className="container animate-fade-in" style={{ display: 'flex', gap: '2rem', alignItems: 'flex-start', width: '100%', maxWidth: '1000px', margin: '0 auto', padding: '2rem' }}>
       
       {/* Sidebar Navigation */}
-      <aside className="glass-panel flex-col" style={{ width: '250px', flexShrink: 0, padding: '1.5rem', gap: '0.5rem' }}>
+      <aside className="glass-panel" style={{ display: 'flex', flexDirection: 'column', width: '250px', flexShrink: 0, padding: '1.5rem', gap: '0.5rem' }}>
         <h2 style={{ fontSize: '0.875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem', color: 'var(--text-secondary)', paddingLeft: '0.75rem' }}>Settings</h2>
         
         <Link 

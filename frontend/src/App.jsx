@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-dom'
-import { Activity, User, Settings, Key, Link as LinkIcon, LogOut } from 'lucide-react'
+import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom'
+import { User, Settings, Key, Link as LinkIcon, LogOut } from 'lucide-react'
 import SubmitReview from './components/SubmitReview'
 import ReviewDashboard from './components/ReviewDashboard'
 import LoginPage from './pages/LoginPage'
@@ -37,25 +37,56 @@ const ProfileDropdown = () => {
     <div style={{ position: 'relative' }} ref={dropdownRef}>
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-center cursor-pointer transition" 
-        style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.1)' }}>
-        <User size={20} />
+        className="flex items-center justify-center cursor-pointer transition hover-brighten" 
+        style={{ 
+          height: '40px', 
+          padding: user?.first_name ? '0 0.25rem 0 1rem' : '0',
+          width: user?.first_name ? 'auto' : '40px',
+          gap: '0.5rem', 
+          borderRadius: '2rem', 
+          background: 'var(--bg-tertiary)', 
+          color: 'var(--text-primary)', 
+          border: '1px solid rgba(255,255,255,0.1)' 
+        }}>
+        {user?.first_name && (
+          <span style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--text-secondary)' }}>
+            {user.first_name}
+          </span>
+        )}
+        <div style={{ 
+          width: user?.first_name ? '32px' : '100%', 
+          height: user?.first_name ? '32px' : '100%', 
+          borderRadius: '50%', 
+          background: user?.first_name ? 'rgba(255,255,255,0.05)' : 'transparent', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center' 
+        }}>
+          <User size={user?.first_name ? 16 : 20} />
+        </div>
       </button>
       
       {isOpen && (
-        <div className="glass-panel animate-slide-up" style={{ 
+        <div className="animate-slide-up" style={{ 
           position: 'absolute', 
           top: '100%', 
           right: 0, 
-          marginTop: '0.5rem',
-          minWidth: '220px',
+          marginTop: '0.75rem',
+          minWidth: '240px',
           padding: '0.5rem',
-          zIndex: 50,
+          zIndex: 1000,
           display: 'flex',
           flexDirection: 'column',
-          gap: '4px'
+          gap: '4px',
+          backgroundColor: 'rgba(10, 15, 28, 0.95)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
+          border: '1px solid rgba(255,255,255,0.15)',
+          borderTop: '1px solid rgba(255,255,255,0.25)',
+          borderRadius: '12px',
+          boxShadow: '0 20px 40px -10px rgba(0, 0, 0, 0.8), 0 0 20px rgba(59, 130, 246, 0.1)'
         }}>
-          <div style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', marginBottom: '4px' }}>
+          <div style={{ padding: '0.75rem 0.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '8px' }}>
             <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>{user?.first_name} {user?.last_name}</div>
             <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>{user?.email}</div>
           </div>
@@ -81,10 +112,13 @@ const ProfileDropdown = () => {
 
 const HeaderNavigation = () => {
   const { user } = useAuth();
+  const location = useLocation();
   
   return (
     <nav className="flex items-center gap-4">
-      <Link to="/" className="btn btn-primary" style={{ textDecoration: 'none' }}>+ New Review</Link>
+      {location.pathname !== '/' && (
+        <Link to="/" className="btn btn-primary" style={{ textDecoration: 'none' }}>+ New Review</Link>
+      )}
       {user ? (
         <ProfileDropdown />
       ) : (
@@ -98,19 +132,27 @@ function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <header className="glass-panel" style={{ borderRadius: 0, borderTop: 'none', borderLeft: 'none', borderRight: 'none', padding: '1rem 2rem', position: 'relative', zIndex: 100 }}>
-          <div className="container flex items-center justify-between" style={{ padding: 0 }}>
-            <Link to="/" className="flex items-center gap-2" style={{ textDecoration: 'none', color: 'var(--text-primary)' }}>
-              <div style={{ padding: '0.5rem', background: 'var(--accent-primary)', borderRadius: '8px', display: 'flex' }}>
-                <Activity size={24} color="white" />
-              </div>
-              <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em' }}>AERP</h1>
+        <header style={{ 
+          width: '100%',
+          padding: '1rem 2rem',
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+          background: 'rgba(10, 15, 28, 0.85)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: '0 4px 30px rgba(0, 0, 0, 0.5)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <Link to="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
+              <img src="/logo-full.png" alt="AERP" style={{ height: '32px', objectFit: 'contain' }} />
             </Link>
             <HeaderNavigation />
           </div>
         </header>
 
-        <main className="container flex-col" style={{ flex: 1 }}>
+        <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />

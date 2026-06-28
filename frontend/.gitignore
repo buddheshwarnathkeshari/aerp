@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Environment — NEVER commit (Vite reads VITE_* vars from these)
+.env
+.env.local
+.env.*.local
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -23,3 +28,9 @@ dist-ssr
 *.sln
 *.sw?
 node_modules/
+
+# Test coverage
+coverage/
+
+# Storybook
+storybook-static/

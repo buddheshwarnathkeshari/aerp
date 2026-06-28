@@ -66,30 +66,11 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - JIRA_SERVER=${JIRA_SERVER}
-      - JIRA_EMAIL=${JIRA_EMAIL}
-      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
-      - GEMINI_MODEL=${GEMINI_MODEL}
-      - GEMINI_EMBEDDING_MODEL=${GEMINI_EMBEDDING_MODEL}
-      - LLM_PROVIDER=${LLM_PROVIDER}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
-      - OLLAMA_MODEL=${OLLAMA_MODEL}
-      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL}
-      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
-      - APP_ENV=${APP_ENV}
-      - LOG_LEVEL=${LOG_LEVEL}
-      - MIN_CONFIDENCE_FOR_PR_COMMENT=${MIN_CONFIDENCE_FOR_PR_COMMENT}
-      - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS}
-      - HITL_RISK_THRESHOLD=${HITL_RISK_THRESHOLD}
+    # env_file loads all variables from .env into the container.
+    # DRYer than listing each variable explicitly — adding a new
+    # env var only requires changing .env, not both service definitions.
+    env_file:
+      - .env
     volumes:
       - ./backend:/app/backend    # live reload in development
       - ./credentials:/app/credentials
@@ -116,30 +97,8 @@ services:
       dockerfile: Dockerfile
     container_name: aerp_worker
     restart: unless-stopped
-    environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - JIRA_SERVER=${JIRA_SERVER}
-      - JIRA_EMAIL=${JIRA_EMAIL}
-      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
-      - GEMINI_MODEL=${GEMINI_MODEL}
-      - GEMINI_EMBEDDING_MODEL=${GEMINI_EMBEDDING_MODEL}
-      - LLM_PROVIDER=${LLM_PROVIDER}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
-      - OLLAMA_MODEL=${OLLAMA_MODEL}
-      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL}
-      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
-      - APP_ENV=${APP_ENV}
-      - MIN_CONFIDENCE_FOR_PR_COMMENT=${MIN_CONFIDENCE_FOR_PR_COMMENT}
-      - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS}
-      - HITL_RISK_THRESHOLD=${HITL_RISK_THRESHOLD}
-      - MOCK_LLM=${MOCK_LLM}
+    env_file:
+      - .env
     volumes:
       - ./backend:/app/backend
       - ./credentials:/app/credentials

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { ShieldAlert, Bug, FileCode, CheckCircle, Info, Send, ChevronDown, Edit2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import { createPortal } from 'react-dom'
+import axios from 'axios'
 
 export default function FindingsViewer({ findings, reviewId }) {
   if (!findings || findings.length === 0) {
@@ -82,12 +84,8 @@ function FindingCard({ finding, reviewId }) {
       if (editedMessage) {
         payload.edited_message = editedMessage
       }
-      const res = await fetch(`http://localhost:8000/reviews/${reviewId}/findings/${finding.id}/post`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      if (res.ok) {
+      const res = await axios.post(`/reviews/${reviewId}/findings/${finding.id}/post`, payload)
+      if (res.status === 200 || res.status === 201) {
         setPosted(true)
       }
     } catch (err) {
@@ -189,11 +187,11 @@ function FindingCard({ finding, reviewId }) {
         </div>
       </div>
 
-      {isModalOpen && (
+      {isModalOpen && createPortal(
         <div style={{ 
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
           background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
-          display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 
+          display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 
         }}>
           <div className="glass-panel animate-slide-up" style={{ width: '90%', maxWidth: '600px', padding: '1.5rem' }}>
             <div className="flex justify-between items-center mb-4">
@@ -223,7 +221,8 @@ function FindingCard({ finding, reviewId }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

@@ -219,7 +219,7 @@ const ProfileConnectors = () => {
                     <button
                       onClick={() => handleDisconnect(integration)}
                       className="btn"
-                      style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.2)' }}
+                      style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.2)', minWidth: '120px' }}
                     >
                       Disconnect
                     </button>
@@ -227,6 +227,7 @@ const ProfileConnectors = () => {
                     <button
                       onClick={() => openConnectModal(integration)}
                       className="btn btn-primary"
+                      style={{ minWidth: '120px' }}
                     >
                       Connect
                     </button>

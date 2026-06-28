@@ -2,6 +2,9 @@
 backend/agents/base_agent.py
 
 Abstract base class that ALL specialist agents inherit from.
+each agent only needs to define:
+    - Its system prompt  (WHAT to look for)
+    - Its result_key    (WHERE in ReviewState to store results)
 
 WHY AN ABSTRACT BASE CLASS?
   All agents (Code Review, Security, Requirements, etc.) share the same
@@ -12,15 +15,11 @@ WHY AN ABSTRACT BASE CLASS?
     4. Run the agent with the PR context
     5. Return a structured AgentReport
 
-  Without a base class, we'd duplicate this ~50 lines of code in every agent.
-  With a base class, each agent only needs to define:
-    - Its system prompt  (WHAT to look for)
-    - Its result_key    (WHERE in ReviewState to store results)
 
 DESIGN PATTERNS USED HERE:
   1. Template Method Pattern:
      The base class defines the algorithm (run()).
-     Subclasses override specific steps (system_prompt, result_key).
+     Subclasses override specific steps (SYSTEM_PROMPT, result_key).
 
   2. Strategy Pattern (via LangChain):
      The LLM is swappable — you could swap Gemini for Claude/GPT-4
@@ -48,9 +47,8 @@ HOW ReAct AGENTS WORK:
 """
 
 import time
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Any
-
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain.agents import AgentExecutor, create_react_agent
@@ -71,38 +69,25 @@ class BaseAgent(ABC):
 
     To create a new agent:
       1. Subclass BaseAgent
-      2. Override system_prompt property
-      3. Override result_key property
-      4. That's it.
+      2. Set AGENT_NAME = "my_agent"  (e.g. "security_agent")
+      3. Set SYSTEM_PROMPT = SYSTEM_PROMPT  (import from prompts/)
 
-    The run() method handles everything else automatically.
+    That's it. result_key is derived automatically as AGENT_NAME with
+    '_agent' replaced by '_result' (e.g. "security_agent" → "security_result").
     """
 
-    # ── Abstract properties — subclasses MUST implement ───────────────────────
+    # ── Class-level variables — the ONLY things a subclass needs to define ────
+    AGENT_NAME: str = ""
+    SYSTEM_PROMPT: str = ""  # subclasses assign their imported SYSTEM_PROMPT
 
+    # ── Derived automatically — no subclass boilerplate needed ────────────────
     @property
-    @abstractmethod
-    def system_prompt(self) -> str:
-        """
-        The system prompt that defines what this agent looks for.
-        Each agent has a different domain: code quality, security, requirements, etc.
-        """
-        ...
-
-    @property
-    @abstractmethod
     def result_key(self) -> str:
         """
-        The ReviewState key where this agent stores its result.
-        Example: "code_review_result", "security_result"
+        Derived from AGENT_NAME: "security_agent" → "security_result".
+        Convention: all specialist agents follow the *_agent → *_result pattern.
         """
-        ...
-
-    @property
-    @abstractmethod
-    def agent_name(self) -> str:
-        """Human-readable name. Used in logs and finding attribution."""
-        ...
+        return self.AGENT_NAME.replace("_agent", "_result")
 
     # ── Shared implementation — same for all agents ───────────────────────────
 
@@ -159,7 +144,7 @@ class BaseAgent(ABC):
         start_time = time.time()
 
         logger.info(
-            f"{self.agent_name} starting",
+            f"{self.AGENT_NAME} starting",
             review_id=review_id,
         )
 
@@ -169,7 +154,7 @@ class BaseAgent(ABC):
 
             # Build the message list for the LLM
             messages = [
-                SystemMessage(content=self.system_prompt),
+                SystemMessage(content=self.SYSTEM_PROMPT),
                 HumanMessage(content=human_message),
             ]
 
@@ -184,7 +169,7 @@ class BaseAgent(ABC):
             # call the structured output LLM with the enriched context.
             from backend.utils.pubsub import publish_agent_status
             
-            await publish_agent_status(review_id, self.agent_name, "running", "Reasoning and determining needed context...")
+            await publish_agent_status(review_id, self.AGENT_NAME, "running", "Reasoning and determining needed context...")
             
             tool_results = []
             tool_response = await llm_with_tools.ainvoke(messages)
@@ -195,15 +180,15 @@ class BaseAgent(ABC):
                     tool_name = tool_call.get("name", "")
                     tool_args = tool_call.get("args", {})
                     logger.info(
-                        f"{self.agent_name} calling tool",
+                        f"{self.AGENT_NAME} calling tool",
                         tool=tool_name,
                         args=tool_args,
                     )
                     query_str = tool_args.get("query", "")
                     if query_str:
-                        await publish_agent_status(review_id, self.agent_name, "running", f"Searching codebase for '{query_str}'...")
+                        await publish_agent_status(review_id, self.AGENT_NAME, "running", f"Searching codebase for '{query_str}'...")
                     else:
-                        await publish_agent_status(review_id, self.agent_name, "running", f"Running tool {tool_name}...")
+                        await publish_agent_status(review_id, self.AGENT_NAME, "running", f"Running tool {tool_name}...")
                         
                     # Find and call the matching tool
                     for t in tools:
@@ -241,11 +226,11 @@ class BaseAgent(ABC):
                 from backend.schemas.findings import Recommendation
                 # Final call: get structured AgentReport
                 
-                await publish_agent_status(review_id, self.agent_name, "running", "Compiling final findings and recommendations...")
+                await publish_agent_status(review_id, self.AGENT_NAME, "running", "Compiling final findings and recommendations...")
                 
                 report = None
                 current_messages = [
-                    SystemMessage(content=self.system_prompt),
+                    SystemMessage(content=self.SYSTEM_PROMPT),
                     HumanMessage(content=enriched_human),
                 ]
                 
@@ -267,14 +252,14 @@ class BaseAgent(ABC):
                     # Fallback if all 3 attempts fail
                     report = AgentReport(
                         findings=[],
-                        overall_assessment=f"JSON Parsing Failed after 3 attempts with {self.agent_name}. The LLM output could not be parsed.",
+                        overall_assessment=f"JSON Parsing Failed after 3 attempts with {self.AGENT_NAME}. The LLM output could not be parsed.",
                         recommendation=Recommendation.APPROVE_WITH_COMMENTS,
                         confidence=0.0
                     )
 
             elapsed = round(time.time() - start_time, 2)
             logger.info(
-                f"{self.agent_name} complete",
+                f"{self.AGENT_NAME} complete",
                 review_id=review_id,
                 findings_count=len(report.findings),
                 recommendation=report.recommendation,
@@ -284,7 +269,7 @@ class BaseAgent(ABC):
             # Convert Pydantic findings → AgentFinding TypedDicts for state
             agent_findings = [
                 {
-                    "agent": self.agent_name,
+                    "agent": self.AGENT_NAME,
                     "severity": f.severity.value,
                     "confidence": f.confidence,
                     "title": f.title,
@@ -300,7 +285,7 @@ class BaseAgent(ABC):
 
             # Build AgentResult for storage in state
             agent_result = {
-                "agent": self.agent_name,
+                "agent": self.AGENT_NAME,
                 "findings": agent_findings,
                 "overall_assessment": report.overall_assessment,
                 "recommendation": report.recommendation.value,
@@ -315,14 +300,14 @@ class BaseAgent(ABC):
 
         except Exception as e:
             logger.error(
-                f"{self.agent_name} failed",
+                f"{self.AGENT_NAME} failed",
                 review_id=review_id,
                 error=str(e),
             )
             # Non-fatal: return empty result so other agents can continue
             return {
                 self.result_key: {
-                    "agent": self.agent_name,
+                    "agent": self.AGENT_NAME,
                     "findings": [],
                     "overall_assessment": f"Agent failed: {str(e)}",
                     "recommendation": "approve_with_comments",

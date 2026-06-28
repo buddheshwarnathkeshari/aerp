@@ -10,8 +10,8 @@ class UserCreate(BaseModel):
     last_name: Optional[str] = None
 
 class UserUpdate(BaseModel):
-    first_name: Optional[str] = Field(None, min_length=1)
-    last_name: Optional[str] = Field(None, min_length=1)
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 class ChangePasswordRequest(BaseModel):
     old_password: str

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Activity, LogIn } from 'lucide-react';
+import { LogIn } from 'lucide-react';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -32,9 +32,7 @@ const LoginPage = () => {
     <div className="flex items-center justify-center h-screen bg-[var(--bg-secondary)] px-4">
       <div className="glass-panel max-w-md w-full p-8 flex flex-col gap-6" style={{ animation: 'slideUp 0.5s ease-out forwards' }}>
         <div className="text-center flex flex-col items-center gap-3">
-          <div style={{ padding: '0.75rem', background: 'var(--accent-primary)', borderRadius: '12px', display: 'inline-flex' }}>
-            <Activity size={32} color="white" />
-          </div>
+          <img src="/logo-full.png" alt="AERP" style={{ height: '64px', objectFit: 'contain' }} />
           <h2 className="text-2xl font-bold m-0 mt-2">Welcome Back</h2>
           <p className="text-sm m-0" style={{ color: 'var(--text-secondary)' }}>Sign in to access your dashboard</p>
         </div>

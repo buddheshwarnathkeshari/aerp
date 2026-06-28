@@ -23,6 +23,20 @@ export default function ApprovalInterface({ reviewId, prUrl, review, findings, o
     }
   }
 
+  const handleReject = async () => {
+    if(!window.confirm("Are you sure you want to reject this review? No PRs will be generated.")) return;
+    
+    setLoading(true)
+    try {
+      await axios.post(`${API_BASE}/reviews/${reviewId}/cancel`)
+      onApproved() // Triggers parent fetchStatus, which will update the UI
+    } catch (err) {
+      console.error(err)
+      setError(err.response?.data?.detail || 'Failed to reject review.')
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="flex-col gap-6" style={{ marginTop: '2rem' }}>
       {/* Warning Banner */}
@@ -54,7 +68,7 @@ export default function ApprovalInterface({ reviewId, prUrl, review, findings, o
             <button
               className="btn btn-secondary"
               style={{ color: 'var(--accent-danger)', borderColor: 'rgba(239,68,68,0.4)' }}
-              onClick={() => alert('Reject flow is not implemented in this phase.')}
+              onClick={handleReject}
               disabled={loading}
             >
               <X size={16} /> Reject

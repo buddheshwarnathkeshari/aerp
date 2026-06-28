@@ -20,25 +20,39 @@ export const AuthProvider = ({ children }) => {
   }, [token]);
 
   const fetchCurrentUser = async (currentToken = token) => {
-    if (!currentToken) return;
+    if (!currentToken) {
+      setIsLoading(false);  // Fix: early return must always unblock the loader
+      return;
+    }
     setIsLoading(true);
+
+    // Timeout guard — if the API doesn't respond in 8s (e.g. container starting
+    // up, Vite proxy hanging on a stale connection), abort and unblock the UI.
+    // Without this, fetch hangs indefinitely → isLoading stays true → spinner forever.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
     try {
       const response = await fetch('/api/v1/auth/me', {
-        headers: {
-          'Authorization': `Bearer ${currentToken}`
-        }
+        headers: { 'Authorization': `Bearer ${currentToken}` },
+        signal: controller.signal,
       });
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
       } else {
-        // Token might be expired, clear it and let them login again
-        // For a production app, we would attempt to refresh it here
+        // Token expired or invalid — clear it so user is sent to login
         setToken(null);
       }
     } catch (error) {
-      console.error("Failed to fetch user:", error);
+      if (error.name === 'AbortError') {
+        // Timed out — API is slow/starting up. Don't clear token; user can retry.
+        console.warn('Auth check timed out — API may still be starting up.');
+      } else {
+        console.error('Failed to fetch user:', error);
+      }
     } finally {
+      clearTimeout(timeout);
       setIsLoading(false);
     }
   };

@@ -34,6 +34,8 @@ export default function ReviewDashboard() {
   const [findings, setFindings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [notFound, setNotFound] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
 
   const [progressLogs, setProgressLogs] = useState({})
 
@@ -50,7 +52,11 @@ export default function ReviewDashboard() {
       setError('')
     } catch (err) {
       console.error(err)
-      setError(err.response?.data?.detail || 'Failed to load review.')
+      if (err.response?.status === 404) {
+        setNotFound(true)  // Stop polling — review doesn't exist
+      } else {
+        setError(err.response?.data?.detail || 'Failed to load review.')
+      }
     } finally {
       setLoading(false)
     }
@@ -75,14 +81,15 @@ export default function ReviewDashboard() {
     fetchLogs()
   }, [fetchStatus, fetchLogs])
 
-  // Poll every 5 seconds while actively processing
+  // Poll every 5 seconds while actively processing — stop on 404
   useEffect(() => {
     if (!review) return
     if (!ACTIVE_STATUSES.has(review.status)) return
+    if (notFound) return  // Review was deleted or never existed
 
     const interval = setInterval(fetchStatus, 5000)
     return () => clearInterval(interval)
-  }, [review?.status, fetchStatus])
+  }, [review?.status, fetchStatus, notFound])
 
   // WebSocket for real-time progress
   useEffect(() => {
@@ -97,15 +104,12 @@ export default function ReviewDashboard() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        if (data.agent) {
-          setProgressLogs(prev => ({ ...prev, [data.agent]: data }))
-        } else {
-          // Fallback if structured but no agent key
-          setProgressLogs(prev => ({ ...prev, [event.data]: { agent: event.data, message: event.data, status: 'running' } }))
-        }
+        // Use agent name as key if non-empty, otherwise fall back to message text
+        const key = data.agent || data.message || event.data
+        setProgressLogs(prev => ({ ...prev, [key]: { ...data, agent: data.agent || 'Agent' } }))
       } catch (e) {
         // Fallback for raw text logs
-        setProgressLogs(prev => ({ ...prev, [event.data]: { agent: event.data, message: event.data, status: 'running' } }))
+        setProgressLogs(prev => ({ ...prev, [event.data]: { agent: 'Agent', message: event.data, status: 'running' } }))
       }
     }
     
@@ -121,6 +125,17 @@ export default function ReviewDashboard() {
           <Loader size={48} color="var(--accent-primary)" className="animate-spin" />
           <p>Loading review...</p>
         </div>
+      </div>
+    )
+  }
+
+  if (notFound) {
+    return (
+      <div className="glass-panel" style={{ marginTop: '2rem', borderColor: 'var(--accent-warning)' }}>
+        <h3 style={{ color: 'var(--accent-warning)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <AlertTriangle /> Review Not Found
+        </h3>
+        <p style={{ margin: '0.5rem 0 0 0' }}>This review no longer exists. It may have been from a previous session.</p>
       </div>
     )
   }
@@ -144,8 +159,25 @@ export default function ReviewDashboard() {
     return <ApprovalInterface reviewId={id} prUrl={prUrl} review={review} findings={findings} onApproved={fetchStatus} />
   }
 
+  // Derive live status based on progress logs for the chip when actively running
+  let displayStatus = review.status;
+  let inferredStep = 0;
+  if (ACTIVE_STATUSES.has(review.status)) {
+    const logAgents = Object.keys(progressLogs);
+    if (logAgents.includes('Consensus Agent')) {
+      displayStatus = 'consensus';
+      inferredStep = 3;
+    } else if (['Code Review Agent', 'Security Agent', 'Database Agent', 'Requirements Agent', 'Scalability Agent', 'Standards Agent', 'Architecture Agent', 'Blast Radius Agent'].some(a => logAgents.includes(a))) {
+      displayStatus = 'reviewing';
+      inferredStep = 2;
+    } else if (logAgents.includes('Repository Analyzer') || logAgents.includes('Orchestrator Agent')) {
+      displayStatus = 'analyzing';
+      inferredStep = 1;
+    }
+  }
+
   return (
-    <div className="flex-col gap-6" style={{ marginTop: '2rem' }}>
+    <div className="container flex-col gap-6" style={{ marginTop: '2rem' }}>
       {/* Header */}
       <div className="glass-panel animate-slide-up">
         <div className="flex justify-between items-center mb-4">
@@ -173,7 +205,7 @@ export default function ReviewDashboard() {
                 Abort Review
               </button>
             )}
-            <StatusBadge status={review.status} />
+            <StatusBadge status={displayStatus} />
           </div>
         </div>
         
@@ -211,13 +243,6 @@ export default function ReviewDashboard() {
 
       {/* Active: Processing */}
       {ACTIVE_STATUSES.has(review.status) && (() => {
-        let inferredStep = 0;
-        const logAgents = Object.keys(progressLogs);
-        if (logAgents.includes('Repository Analyzer') || logAgents.includes('Orchestrator Agent')) inferredStep = 1;
-        const specialistAgents = ['Code Review Agent', 'Security Agent', 'Database Agent', 'Requirements Agent', 'Scalability Agent', 'Standards Agent', 'Architecture Agent', 'Blast Radius Agent'];
-        if (specialistAgents.some(a => logAgents.includes(a))) inferredStep = 2;
-        if (logAgents.includes('Consensus Agent')) inferredStep = 3;
-
         const stepNames = ['Collecting PR Info', 'Analyzing Repository', 'Agent Review in Progress', 'Reaching Consensus'];
 
         return (

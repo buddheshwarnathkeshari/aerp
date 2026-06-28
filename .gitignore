@@ -15,6 +15,13 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# SQLite (local testing)
+*.sqlite3
+*.db
 
 # Docker
 *.log
@@ -27,5 +34,14 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets & credentials
 credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dev leftovers
 test_embeddings.py
+uploads/
