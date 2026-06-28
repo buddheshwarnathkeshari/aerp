@@ -5,8 +5,8 @@
 
 ## 🎥 Live Demo
 
-[![Live Demo](docs/assets/StartCodeReview.png)](https://github.com/buddheshwarnathkeshari/aerp/raw/main/docs/assets/Demo.mp4)
-*Click the image above to watch the full video demonstration.*
+![Live Demo](docs/assets/Demo.gif)
+
 
 
 ## 🚀 What it does
