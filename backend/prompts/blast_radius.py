@@ -5,7 +5,6 @@ System prompt for the Blast Radius Agent.
 
 DOMAIN: What else breaks if this PR has a bug?
 
-INTERVIEW: "What is the Blast Radius Agent and why is it unique?"
   "The Blast Radius Agent answers: 'If there's a bug in this PR, what else breaks?'
   It traces dependencies — which downstream services call the changed API?
   Which features depend on the changed data model? Which tests cover these paths?
@@ -67,12 +66,12 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
     return f"""Analyze the blast radius and downstream impact of this pull request.
 
 ## Pull Request Details
-**Title**: {pr_metadata.get('title', 'N/A')}
-**Repository**: {pr_metadata.get('repo_owner', '')}/{pr_metadata.get('repo_name', '')}
-**Branch**: {pr_metadata.get('branch', 'N/A')} → {pr_metadata.get('base_branch', 'main')}
+**Title**: {pr_metadata.get("title", "N/A")}
+**Repository**: {pr_metadata.get("repo_owner", "")}/{pr_metadata.get("repo_name", "")}
+**Branch**: {pr_metadata.get("branch", "N/A")} → {pr_metadata.get("base_branch", "main")}
 
 ## Changed Files ({len(changed_files)} files)
-{chr(10).join(f'  - {f}' for f in changed_files[:20])}
+{chr(10).join(f"  - {f}" for f in changed_files[:20])}
 
 ## Impact Pre-classification
 {impact_analysis}
@@ -82,7 +81,7 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
 
 ## Full Diff
 ```diff
-{pr_metadata.get('diff', 'No diff available')[:7000]}
+{pr_metadata.get("diff", "No diff available")[:7000]}
 ```
 
 Answer: If there is a bug in this PR, what breaks? Who is affected? How bad is it?
@@ -96,9 +95,13 @@ def _classify_impact(changed_files: list) -> str:
     paths = " ".join(changed_files).lower()
 
     if any(x in paths for x in ["migration", "migrate", "schema", "alembic"]):
-        concerns.append("⚠️  Database migration detected — irreversible data changes possible")
+        concerns.append(
+            "⚠️  Database migration detected — irreversible data changes possible"
+        )
     if any(x in paths for x in ["auth", "login", "password", "token", "session"]):
-        concerns.append("🔐 Authentication code changed — all users potentially affected")
+        concerns.append(
+            "🔐 Authentication code changed — all users potentially affected"
+        )
     if any(x in paths for x in ["middleware", "base", "core", "common", "utils"]):
         concerns.append("💥 Shared/core code changed — wide blast radius")
     if any(x in paths for x in ["payment", "billing", "stripe", "invoice"]):
@@ -106,6 +109,8 @@ def _classify_impact(changed_files: list) -> str:
     if any(x in paths for x in ["celery", "task", "worker", "queue"]):
         concerns.append("⚙️  Background task code changed — async job impact")
     if not concerns:
-        concerns.append("ℹ️  No high-risk patterns detected — standard blast radius assessment")
+        concerns.append(
+            "ℹ️  No high-risk patterns detected — standard blast radius assessment"
+        )
 
     return "\n".join(concerns)

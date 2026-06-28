@@ -54,15 +54,15 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
     return f"""Review this pull request for engineering standards and operational readiness.
 
 ## Pull Request Details
-**Title**: {pr_metadata.get('title', 'N/A')}
-**Repository**: {pr_metadata.get('repo_owner', '')}/{pr_metadata.get('repo_name', '')}
+**Title**: {pr_metadata.get("title", "N/A")}
+**Repository**: {pr_metadata.get("repo_owner", "")}/{pr_metadata.get("repo_name", "")}
 
 ## Context
 {raw_context[:2000]}
 
 ## Full Diff
 ```diff
-{pr_metadata.get('diff', 'No diff available')[:8000]}
+{pr_metadata.get("diff", "No diff available")[:8000]}
 ```
 
 Focus on: logging quality, error handling completeness, code maintainability, \

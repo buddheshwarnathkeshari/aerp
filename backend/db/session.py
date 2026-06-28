@@ -3,7 +3,7 @@ backend/db/session.py
 
 Database connection management.
 
-WHY ASYNC DATABASE?
+Design Note: Async DATABASE?
   FastAPI is async. If you use a synchronous database driver in an async
   application, every DB query BLOCKS the event loop — no other requests
   can be served while waiting for the database.
@@ -16,7 +16,6 @@ WHY ASYNC DATABASE?
 
   We use asyncpg (async PostgreSQL driver) via SQLAlchemy's async engine.
 
-INTERVIEW: "What is connection pooling?"
   Creating a new database connection is expensive (~30ms, TLS handshake).
   A connection pool maintains a set of open connections and reuses them.
   SQLAlchemy's async engine manages this automatically.
@@ -24,18 +23,18 @@ INTERVIEW: "What is connection pooling?"
   max_overflow=20 means: allow up to 30 total if burst traffic hits.
 """
 
+import sys
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 from backend.config.settings import get_settings
 
 settings = get_settings()
 
 # ── Async Engine ──────────────────────────────────────────────────────────────
-# WHY echo=False in production?
+# Design Note: echo=False in production?
 # echo=True logs every SQL query. Great for debugging. Terrible for production
 # (logs fill up fast, sensitive data exposed).
-import sys
-from sqlalchemy.pool import NullPool
 
 is_celery = "celery" in sys.argv[0] or any("celery" in arg for arg in sys.argv)
 
@@ -50,10 +49,7 @@ else:
     engine_kwargs["pool_size"] = 10
     engine_kwargs["max_overflow"] = 20
 
-engine = create_async_engine(
-    settings.database_url,
-    **engine_kwargs
-)
+engine = create_async_engine(settings.database_url, **engine_kwargs)
 
 # ── Session Factory ───────────────────────────────────────────────────────────
 # async_sessionmaker creates AsyncSession objects.
@@ -65,6 +61,7 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False,
 )
 
+
 # ── Base Model ────────────────────────────────────────────────────────────────
 # All SQLAlchemy models inherit from this Base.
 class Base(DeclarativeBase):
@@ -75,7 +72,6 @@ async def get_db():
     """
     FastAPI dependency that provides a database session per request.
 
-    HOW IT WORKS:
       FastAPI calls this function for every request that needs a DB.
       `async with` guarantees the session is closed after the request,
       even if an exception occurs.
@@ -85,7 +81,6 @@ async def get_db():
       async def list_reviews(db: AsyncSession = Depends(get_db)):
           ...
 
-    INTERVIEW: "What is the Unit of Work pattern?"
       Each request gets its own session (unit of work).
       All DB operations in that request are grouped together.
       If anything fails, the whole session rolls back atomically.

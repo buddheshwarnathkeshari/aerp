@@ -1,4 +1,3 @@
-"""backend/agents/scalability_agent.py"""
 from backend.agents.base_agent import BaseAgent
 from backend.prompts.scalability import SYSTEM_PROMPT
 

@@ -6,7 +6,7 @@ WHAT IS THIS?
   All environment variables are read HERE and ONLY here.
   No other file should call os.getenv() directly.
 
-WHY PYDANTIC SETTINGS?
+Design Note: Pydantic SETTINGS?
   Pydantic Settings reads from your .env file AND validates types.
   If HITL_RISK_THRESHOLD is supposed to be an int but you put "abc",
   the app CRASHES at startup with a clear error — not silently fails
@@ -30,25 +30,25 @@ class Settings(BaseSettings):
 
     # ── Model config ──────────────────────────────────────────────────────────
     model_config = SettingsConfigDict(
-        env_file=".env",          # Load from .env file
+        env_file=".env",  # Load from .env file
         env_file_encoding="utf-8",
-        case_sensitive=False,     # GOOGLE_API_KEY == google_api_key
-        extra="ignore",           # Ignore unknown env vars (don't crash)
+        case_sensitive=False,  # GOOGLE_API_KEY == google_api_key
+        extra="ignore",  # Ignore unknown env vars (don't crash)
     )
 
     # ── LLM Settings ──────────────────────────────────────────────────────────
     # LLM Settings
     llm_provider: str = Field(default="gemini", description="gemini, openai, anthropic")
-    
+
     # Gemini
     google_api_key: str
     gemini_model: str = Field(default="gemini-2.5-flash")
     gemini_embedding_model: str = Field(default="text-embedding-004")
-    
+
     # OpenAI
     openai_api_key: str = Field(default="")
     openai_model: str = Field(default="gpt-4o")
-    
+
     # Anthropic
     anthropic_api_key: str = Field(default="")
     anthropic_model: str = Field(default="claude-3-5-sonnet-latest")
@@ -81,10 +81,10 @@ class Settings(BaseSettings):
     # ── OAuth Client Settings ─────────────────────────────────────────────────
     github_client_id: str = ""
     github_client_secret: str = ""
-    
+
     jira_client_id: str = ""
     jira_client_secret: str = ""
-    
+
     google_client_id: str = ""
     google_client_secret: str = ""
 
@@ -124,13 +124,12 @@ def get_settings() -> Settings:
     """
     Returns a cached Settings instance.
 
-    WHY @lru_cache?
+    Design Note: @lru_cache
     Settings reads from the .env file. Without caching, every call
     to get_settings() reads and parses the file from disk.
     With @lru_cache, it reads once and returns the same object forever.
     This is the singleton pattern in Python.
 
-    INTERVIEW: "How do you avoid reading config files on every request?"
     Answer: Cache the settings object at startup using @lru_cache or a
     module-level singleton.
     """

@@ -8,7 +8,7 @@ WHAT IS ReviewState?
   LangGraph workflow. Every agent reads from it. Every agent writes to it.
   Think of it as a whiteboard that all agents can see.
 
-WHY TypedDict INSTEAD OF A REGULAR DICT?
+Design Note: TypedDict INSTEAD OF A REGULAR DICT?
   TypedDict gives us type hints without runtime overhead.
   - dict           → no type hints, runtime bugs
   - Pydantic model → validates on every write (too slow for state)
@@ -25,7 +25,6 @@ HOW STATE UPDATES WORK IN LANGGRAPH:
 
   You NEVER return the full state from a node — just your changes.
 
-INTERVIEW: "How does LangGraph handle concurrent state writes?"
   LangGraph uses "reducers" — functions that define how to merge updates
   for a specific key. The default reducer replaces the value.
   You can define custom reducers (e.g., list append) with Annotated types.
@@ -39,8 +38,10 @@ from operator import add  # used as a reducer for list fields
 # Sub-types used within ReviewState
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class PRMetadata(TypedDict):
     """Structured data about the GitHub Pull Request."""
+
     pr_number: int
     title: str
     description: str
@@ -49,13 +50,14 @@ class PRMetadata(TypedDict):
     base_branch: str
     repo_owner: str
     repo_name: str
-    changed_files: list[str]   # List of file paths that changed
-    diff: str                   # Full unified diff string
+    changed_files: list[str]  # List of file paths that changed
+    diff: str  # Full unified diff string
     commit_messages: list[str]
 
 
 class JiraTicket(TypedDict):
     """Structured data from the Jira ticket."""
+
     ticket_id: str
     title: str
     description: str
@@ -77,51 +79,58 @@ class AgentFinding(TypedDict):
     process all findings uniformly — it doesn't need to know which
     agent produced a finding to work with it.
     """
-    agent: str                  # e.g. "security_agent", "code_review_agent"
-    severity: str               # "critical" | "high" | "medium" | "low" | "info"
-    confidence: float           # 0.0 to 1.0
-    title: str                  # Short, human-readable title
-    description: str            # Full explanation
-    file_path: Optional[str]    # Which file has this issue (None for general findings)
+
+    agent: str  # e.g. "security_agent", "code_review_agent"
+    severity: str  # "critical" | "high" | "medium" | "low" | "info"
+    confidence: float  # 0.0 to 1.0
+    title: str  # Short, human-readable title
+    description: str  # Full explanation
+    file_path: Optional[str]  # Which file has this issue (None for general findings)
     line_number: Optional[int]  # Which line (None if not applicable)
-    evidence: str               # What the agent observed that led to this finding
+    evidence: str  # What the agent observed that led to this finding
     suggested_fix: Optional[str]  # How to fix it (if agent can suggest)
     owasp_category: Optional[str]  # For security findings: OWASP category
 
 
 class AgentResult(TypedDict):
     """Complete output from a single agent run."""
+
     agent: str
     findings: list[AgentFinding]
-    overall_assessment: str     # A brief paragraph summary
-    recommendation: str         # "approve" | "approve_with_comments" | "request_changes" | "block"
-    confidence: float           # Overall confidence in this agent's assessment
+    overall_assessment: str  # A brief paragraph summary
+    recommendation: (
+        str  # "approve" | "approve_with_comments" | "request_changes" | "block"
+    )
+    confidence: float  # Overall confidence in this agent's assessment
     tokens_used: Optional[int]  # Track cost
 
 
 class ConsensusResult(TypedDict):
     """The final unified report produced by the Consensus Agent."""
-    validated_findings: list[AgentFinding]   # After dedup + confidence filtering
-    all_findings: list[AgentFinding]         # Everything including low confidence
-    risk_score: int                          # 0–100
-    risk_breakdown: dict                     # Per-dimension scores
-    recommendation: str                      # Final: approve/block/etc
-    recommendation_rationale: str            # Why this recommendation
-    findings_for_pr: list[AgentFinding]      # Only findings above confidence threshold
+
+    validated_findings: list[AgentFinding]  # After dedup + confidence filtering
+    all_findings: list[AgentFinding]  # Everything including low confidence
+    risk_score: int  # 0–100
+    risk_breakdown: dict  # Per-dimension scores
+    recommendation: str  # Final: approve/block/etc
+    recommendation_rationale: str  # Why this recommendation
+    findings_for_pr: list[AgentFinding]  # Only findings above confidence threshold
 
 
 class HumanDecision(TypedDict):
     """Records what the human decided during HITL."""
-    decision: str               # "approve" | "reject" | "approve_with_override"
-    reviewer: str               # Who made the decision
-    comment: Optional[str]      # Optional explanation
+
+    decision: str  # "approve" | "reject" | "approve_with_override"
+    reviewer: str  # Who made the decision
+    comment: Optional[str]  # Optional explanation
     overridden_findings: list[str]  # Finding IDs the human acknowledged/dismissed
-    decided_at: str             # ISO timestamp
+    decided_at: str  # ISO timestamp
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The Main State Object
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class ReviewState(TypedDict):
     """
@@ -144,26 +153,26 @@ class ReviewState(TypedDict):
     """
 
     # ── Input data ────────────────────────────────────────────────────────────
-    review_id: str                          # Unique ID for this review session
-    pr_url: str                             # The original PR URL submitted by user
-    jira_url: Optional[str]                 # The original Jira URL
-    doc_url: Optional[str]                  # The original Google Doc URL
+    review_id: str  # Unique ID for this review session
+    pr_url: str  # The original PR URL submitted by user
+    jira_url: Optional[str]  # The original Jira URL
+    doc_url: Optional[str]  # The original Google Doc URL
 
     # ── Collected context (filled by context_collector_node) ──────────────────
-    pr_metadata: Optional[PRMetadata]       # Structured PR data from GitHub
-    jira_ticket: Optional[JiraTicket]       # Structured ticket data from Jira
-    doc_content: Optional[str]             # Raw text from Google Doc
-    raw_context: Optional[str]             # Combined context string for RAG indexing
+    pr_metadata: Optional[PRMetadata]  # Structured PR data from GitHub
+    jira_ticket: Optional[JiraTicket]  # Structured ticket data from Jira
+    doc_content: Optional[str]  # Raw text from Google Doc
+    raw_context: Optional[str]  # Combined context string for RAG indexing
 
     # ── Repository analysis (filled by repo_analyzer_node) ───────────────────
     changed_files_analysis: Optional[dict]  # Per-file metadata
-    impact_graph: Optional[dict]            # What else does this change affect?
-    detected_framework: Optional[str]       # "fastapi" | "django" | "spring_boot" | etc
+    impact_graph: Optional[dict]  # What else does this change affect?
+    detected_framework: Optional[str]  # "fastapi" | "django" | "spring_boot" | etc
 
     # ── Agent results — filled in PARALLEL by each agent ─────────────────────
     # Annotated[list, add] means these lists are APPENDED when parallel
     # agents write to them simultaneously (not overwritten).
-    selected_agents: Optional[list[str]]                # List of agents chosen by orchestrator
+    selected_agents: Optional[list[str]]  # List of agents chosen by orchestrator
     agent_findings: Annotated[list[AgentFinding], add]  # All findings from all agents
 
     # Individual agent results (each agent writes its own key)
@@ -177,25 +186,25 @@ class ReviewState(TypedDict):
     blast_radius_result: Optional[AgentResult]
 
     # ── Cross-agent critique (filled after all agents complete) ───────────────
-    critique_complete: bool                 # Has cross-agent discussion happened?
+    critique_complete: bool  # Has cross-agent discussion happened?
 
     # ── Consensus (filled by consensus_node) ─────────────────────────────────
     consensus_result: Optional[ConsensusResult]
 
     # ── Human-in-the-Loop ────────────────────────────────────────────────────
-    hitl_required: bool                    # Does this review need human approval?
+    hitl_required: bool  # Does this review need human approval?
     human_decision: Optional[HumanDecision]
 
     # ── Outputs ───────────────────────────────────────────────────────────────
     github_comments_posted: bool
-    doc_pr_url: Optional[str]             # URL of generated documentation PR
-    test_pr_url: Optional[str]            # URL of generated test PR
-    final_report: Optional[dict]          # Complete final report
+    doc_pr_url: Optional[str]  # URL of generated documentation PR
+    test_pr_url: Optional[str]  # URL of generated test PR
+    final_report: Optional[dict]  # Complete final report
 
     # ── Metadata ──────────────────────────────────────────────────────────────
-    error: Optional[str]                  # If something fails, store error here
-    started_at: Optional[str]            # ISO timestamp
-    completed_at: Optional[str]          # ISO timestamp
+    error: Optional[str]  # If something fails, store error here
+    started_at: Optional[str]  # ISO timestamp
+    completed_at: Optional[str]  # ISO timestamp
 
 
 def create_initial_state(

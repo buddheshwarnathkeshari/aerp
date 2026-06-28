@@ -7,7 +7,7 @@ DESIGN: Hybrid approach for credentials storage.
   - access_token_encrypted: explicit required column (every provider needs this)
   - credentials: JSONB for provider-specific optional fields
 
-WHY HYBRID (NOT FULL JSONB)?
+Design Note: Hybrid (NOT FULL JSONB)?
   The access token is the one field we ALWAYS need. Making it an explicit
   column gives us a DB-level NOT NULL guarantee. You can't accidentally
   insert a row without it. A JSONB blob could have {"typo_token": "..."} and
@@ -29,7 +29,7 @@ CREDENTIAL ENCRYPTION:
 
 EXAMPLES of `credentials` JSONB per provider:
   GitHub:  {}   (no refresh token, tokens don't expire)
-  Jira:    {"refresh_token": "enc_...", "expires_at": "2026-...", 
+  Jira:    {"refresh_token": "enc_...", "expires_at": "2026-...",
              "site_url": "mycompany.atlassian.net", "cloud_id": "abc123"}
   Google:  {"refresh_token": "enc_...", "expires_at": "2026-..."}
 """
@@ -97,7 +97,9 @@ class ThirdPartyUserAccount(Base, TimestampMixin):
         comment="Their ID on that platform. GitHub numeric ID, Google 'sub', Atlassian account ID.",
     )
     provider_email: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Email on that platform (may differ from AERP email)."
+        Text,
+        nullable=True,
+        comment="Email on that platform (may differ from AERP email).",
     )
     provider_username: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="Display name on platform, e.g. GitHub username."

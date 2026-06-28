@@ -1,5 +1,3 @@
-"""backend/agents/orchestrator_agent.py"""
-
 import time
 from typing import List
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -7,7 +5,6 @@ from pydantic import BaseModel, Field
 import structlog
 
 from backend.prompts.orchestrator import SYSTEM_PROMPT, build_human_message
-from backend.config.settings import get_settings
 
 logger = structlog.get_logger()
 
@@ -44,14 +41,7 @@ class OrchestratorAgent:
             
             llm = base_llm.with_structured_output(OrchestratorDecision)
             
-            import os
-            if os.environ.get("MOCK_LLM") == "1":
-                decision = OrchestratorDecision(
-                    selected_agents=["code_review", "security", "requirements"],
-                    rationale="Mock orchestrator decision"
-                )
-            else:
-                decision: OrchestratorDecision = await llm.ainvoke(messages)
+            decision: OrchestratorDecision = await llm.ainvoke(messages)
             
             elapsed = round(time.time() - start_time, 2)
             logger.info(f"{self.agent_name} complete", review_id=review_id, selected=decision.selected_agents, elapsed=elapsed)

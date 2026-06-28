@@ -49,25 +49,38 @@ without evidence (e.g., don't flag LIMIT 100 as an unbounded query).
 
 def build_human_message(raw_context: str, pr_metadata: dict) -> str:
     changed_files = pr_metadata.get("changed_files", [])
-    db_files = [f for f in changed_files if any(
-        x in f.lower() for x in ["model", "migration", "schema", "query", "repository", "db", "database"]
-    )]
+    db_files = [
+        f
+        for f in changed_files
+        if any(
+            x in f.lower()
+            for x in [
+                "model",
+                "migration",
+                "schema",
+                "query",
+                "repository",
+                "db",
+                "database",
+            ]
+        )
+    ]
 
     return f"""Review this pull request for database issues.
 
 ## Pull Request Details
-**Title**: {pr_metadata.get('title', 'N/A')}
-**Repository**: {pr_metadata.get('repo_owner', '')}/{pr_metadata.get('repo_name', '')}
+**Title**: {pr_metadata.get("title", "N/A")}
+**Repository**: {pr_metadata.get("repo_owner", "")}/{pr_metadata.get("repo_name", "")}
 
 ## Database-related files changed
-{chr(10).join(f'  - {f}' for f in db_files) or '  (none detected — review full diff)'}
+{chr(10).join(f"  - {f}" for f in db_files) or "  (none detected — review full diff)"}
 
 ## Context
 {raw_context[:2000]}
 
 ## Full Diff
 ```diff
-{pr_metadata.get('diff', 'No diff available')[:8000]}
+{pr_metadata.get("diff", "No diff available")[:8000]}
 ```
 
 Focus on correctness, performance, and migration safety. \

@@ -1,4 +1,3 @@
-"""backend/agents/architecture_agent.py"""
 from backend.agents.base_agent import BaseAgent
 from backend.prompts.architecture import SYSTEM_PROMPT
 

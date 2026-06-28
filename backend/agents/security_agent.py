@@ -1,4 +1,3 @@
-"""backend/agents/security_agent.py"""
 from backend.agents.base_agent import BaseAgent
 from backend.prompts.security import SYSTEM_PROMPT
 

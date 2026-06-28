@@ -9,13 +9,13 @@ DESIGN DECISIONS:
   - last_login_at: tracked for security audits and "active user" analytics
   - full_name: a Python @property, NOT a DB column (computed, not stored)
 
-WHY @property instead of a column?
+Design Note: @property instead of a column
   full_name is always derivable from first/last name.
   Storing derived data violates 3NF (Third Normal Form) — you'd have
   to update two places (first_name + full_name) when a name changes.
   A @property computes it on demand, always consistent.
 
-WHY NOT use @cached_property with SQLAlchemy?
+Design Note: Not use @cached_property with SQLAlchemy?
   SQLAlchemy intercepts attribute access on model instances for lazy loading.
   @cached_property stores the result on the instance dict, which can conflict
   with SQLAlchemy's internal mechanisms. Plain @property is safe.

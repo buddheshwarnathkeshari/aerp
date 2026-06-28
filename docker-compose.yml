@@ -16,7 +16,7 @@
 services:
 
   # ── PostgreSQL with pgvector extension ────────────────────────────────────
-  # WHY pgvector image instead of plain postgres?
+  # Design Note: pgvector image instead of plain postgres?
   # The pgvector/pgvector image pre-installs the pgvector extension.
   # Plain postgres requires manual extension installation steps.
   postgres:
@@ -80,13 +80,13 @@ services:
       redis:
         condition: service_healthy
     # Run Alembic migrations THEN start the server.
-    # WHY here and not in a separate container?
+    # Design Note: here and not in a separate container?
     #   Migrations must run after postgres is healthy (depends_on handles this).
     #   Running in the API container ensures migrations complete before traffic.
     command: sh -c "uv run python -m alembic upgrade head && uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload"
 
   # ── Celery Worker ──────────────────────────────────────────────────────────
-  # WHY A SEPARATE WORKER CONTAINER?
+  # Design Note: A SEPARATE WORKER CONTAINER?
   # The FastAPI server handles HTTP requests (fast, < 100ms).
   # LangGraph workflows take 5-10 minutes.
   # You cannot run a 10-minute task inside a web request.

@@ -11,7 +11,7 @@ PURPOSE:
   On page refresh, the frontend fetches all logs for the review from this
   table to restore the full history.
 
-WHY PERSIST LOGS IN POSTGRES AND NOT JUST REDIS?
+Design Note: Persist LOGS IN POSTGRES AND NOT JUST REDIS?
   Redis pubsub is fire-and-forget. If the user refreshes the browser,
   the live stream is gone. By persisting each log to PostgreSQL, we can
   restore the full execution history at any time.

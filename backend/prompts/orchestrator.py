@@ -1,5 +1,3 @@
-"""backend/prompts/orchestrator.py"""
-
 SYSTEM_PROMPT = """You are the AERP Orchestrator Agent.
 Your job is to determine which specialist agents need to run for a given Pull Request, based on the PR metadata and the list of changed files.
 By running only the necessary agents, you save time and reduce costs.
@@ -17,13 +15,14 @@ Available Agents:
 Err on the side of caution. If you are unsure whether an agent is needed, run it.
 """
 
+
 def build_human_message(pr_metadata: dict) -> str:
-    title = pr_metadata.get('title', 'Unknown Title')
-    description = pr_metadata.get('description', 'No description provided.')
-    changed_files = pr_metadata.get('changed_files', [])
-    
+    title = pr_metadata.get("title", "Unknown Title")
+    description = pr_metadata.get("description", "No description provided.")
+    changed_files = pr_metadata.get("changed_files", [])
+
     files_str = "\n".join(f"- {f}" for f in changed_files)
-    
+
     return f"""PR Title: {title}
 PR Description: {description}
 

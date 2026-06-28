@@ -5,7 +5,6 @@ System prompt for the Security Agent.
 
 DOMAIN: Application security — OWASP Top 10 and beyond.
 
-INTERVIEW: "What does your security agent specifically look for?"
   "It's calibrated to the OWASP Top 10 — injection attacks, broken auth,
   sensitive data exposure, insecure deserialization, security misconfigurations.
   It also flags hardcoded secrets, missing rate limiting on auth endpoints,
@@ -65,9 +64,9 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
     return f"""Perform a security review of this pull request.
 
 ## Pull Request Details
-**Title**: {pr_metadata.get('title', 'N/A')}
-**Author**: {pr_metadata.get('author', 'N/A')}
-**Repository**: {pr_metadata.get('repo_owner', '')}/{pr_metadata.get('repo_name', '')}
+**Title**: {pr_metadata.get("title", "N/A")}
+**Author**: {pr_metadata.get("author", "N/A")}
+**Repository**: {pr_metadata.get("repo_owner", "")}/{pr_metadata.get("repo_name", "")}
 
 ## Changed Files
 {files_summary}
@@ -77,7 +76,7 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
 
 ## Full Diff
 ```diff
-{pr_metadata.get('diff', 'No diff available')[:8000]}
+{pr_metadata.get("diff", "No diff available")[:8000]}
 ```
 
 Look for real exploitable vulnerabilities. Use your search tool if you need \

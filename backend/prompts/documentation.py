@@ -1,5 +1,3 @@
-"""backend/prompts/documentation.py"""
-
 SYSTEM_PROMPT = """You are an expert Developer Advocate and Technical Writer.
 Your job is to read an approved Pull Request and update the existing source code and documentation.
 
@@ -25,25 +23,28 @@ Example Output:
 ]
 """
 
-def build_human_message(pr_metadata: dict, jira_ticket: dict, findings: list, raw_files: dict) -> str:
+
+def build_human_message(
+    pr_metadata: dict, jira_ticket: dict, findings: list, raw_files: dict
+) -> str:
     files_context = []
     for path, content in raw_files.items():
         files_context.append(f"=== FILE: {path} ===\n{content}\n")
-    
+
     files_str = "\n".join(files_context)
 
     return f"""
 Please add inline documentation to the following changed files.
 
 === PR METADATA ===
-Title: {pr_metadata.get('title', '')}
-Description: {pr_metadata.get('description', '')}
+Title: {pr_metadata.get("title", "")}
+Description: {pr_metadata.get("description", "")}
 Diff:
-{pr_metadata.get('diff', '')}
+{pr_metadata.get("diff", "")}
 
 === JIRA TICKET ===
-Title: {jira_ticket.get('title', '') if jira_ticket else 'N/A'}
-Description: {jira_ticket.get('description', '') if jira_ticket else 'N/A'}
+Title: {jira_ticket.get("title", "") if jira_ticket else "N/A"}
+Description: {jira_ticket.get("description", "") if jira_ticket else "N/A"}
 
 === APPROVED REVIEW FINDINGS ===
 {findings}

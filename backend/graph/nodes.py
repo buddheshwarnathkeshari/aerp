@@ -29,13 +29,11 @@ PHASE 5+ NODES (not yet):
   - hitl_node
 """
 
-import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from backend.graph.state import ReviewState, PRMetadata, JiraTicket
+from backend.graph.state import ReviewState
 from backend.tools.github_tool import fetch_pr_data
 from backend.tools.jira_tool import fetch_jira_ticket
 from backend.rag.chunker import chunk_pr_diff, chunk_document
@@ -73,6 +71,7 @@ settings = get_settings()
 # NODE 1: Context Collector
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def context_collector_node(state: ReviewState, config: RunnableConfig) -> dict:
     """
     Fetches all external context needed for the review.
@@ -101,12 +100,17 @@ async def context_collector_node(state: ReviewState, config: RunnableConfig) -> 
     """
     review_id = state["review_id"]
     logger.info("Starting context collection", review_id=review_id)
-    await publish_agent_status(review_id, "Context Collector", "running", "Gathering PR metadata, Jira ticket, and Google Docs...")
+    await publish_agent_status(
+        review_id,
+        "Context Collector",
+        "running",
+        "Gathering PR metadata, Jira ticket, and Google Docs...",
+    )
 
     result = {
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
-    
+
     github_token = config["configurable"].get("github_token")
 
     # ── Step 1: Fetch GitHub PR (MANDATORY) ───────────────────────────────────
@@ -158,18 +162,22 @@ async def context_collector_node(state: ReviewState, config: RunnableConfig) -> 
     ]
 
     if jira_ticket:
-        raw_context_parts.extend([
-            f"\n=== JIRA TICKET: {jira_ticket['ticket_id']} ===",
-            f"{jira_ticket['title']}",
-            f"\nAcceptance Criteria:",
-            *[f"  - {ac}" for ac in jira_ticket["acceptance_criteria"]],
-        ])
+        raw_context_parts.extend(
+            [
+                f"\n=== JIRA TICKET: {jira_ticket['ticket_id']} ===",
+                f"{jira_ticket['title']}",
+                "\nAcceptance Criteria:",
+                *[f"  - {ac}" for ac in jira_ticket["acceptance_criteria"]],
+            ]
+        )
 
     if doc_content:
-        raw_context_parts.extend([
-            "\n=== FEATURE DOCUMENTATION ===",
-            doc_content[:3000],
-        ])
+        raw_context_parts.extend(
+            [
+                "\n=== FEATURE DOCUMENTATION ===",
+                doc_content[:3000],
+            ]
+        )
 
     result["raw_context"] = "\n".join(raw_context_parts)
 
@@ -204,7 +212,12 @@ async def context_collector_node(state: ReviewState, config: RunnableConfig) -> 
         total_indexed = await index_chunks(all_chunks, review_id)
         logger.info("RAG indexing complete", total_chunks=total_indexed)
 
-    await publish_agent_status(review_id, "Context Collector", "complete", "Gathered PR metadata, Jira ticket, and Google Docs.")
+    await publish_agent_status(
+        review_id,
+        "Context Collector",
+        "complete",
+        "Gathered PR metadata, Jira ticket, and Google Docs.",
+    )
     logger.info("Context collection complete", review_id=review_id)
     return result
 
@@ -212,6 +225,7 @@ async def context_collector_node(state: ReviewState, config: RunnableConfig) -> 
 # ─────────────────────────────────────────────────────────────────────────────
 # NODE 2: Repository Analyzer
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def repository_analyzer_node(state: ReviewState) -> dict:
     """
@@ -221,7 +235,12 @@ async def repository_analyzer_node(state: ReviewState) -> dict:
     if not pr_metadata:
         return {"error": "Cannot analyze repository: no PR metadata"}
 
-    await publish_agent_status(state["review_id"], "Repository Analyzer", "running", "Determining framework and architectural impact...")
+    await publish_agent_status(
+        state["review_id"],
+        "Repository Analyzer",
+        "running",
+        "Determining framework and architectural impact...",
+    )
 
     changed_files = pr_metadata.get("changed_files", [])
     logger.info("Analyzing repository", num_files=len(changed_files))
@@ -239,7 +258,9 @@ async def repository_analyzer_node(state: ReviewState) -> dict:
     detected_framework = _detect_framework(changed_files)
 
     impact_graph = {
-        "changed_layers": list({f["layer"] for f in files_analysis.values() if f["layer"]}),
+        "changed_layers": list(
+            {f["layer"] for f in files_analysis.values() if f["layer"]}
+        ),
         "has_migrations": any(f["is_migration"] for f in files_analysis.values()),
         "has_config_changes": any(f["is_config"] for f in files_analysis.values()),
         "test_files_changed": [fp for fp, f in files_analysis.items() if f["is_test"]],
@@ -254,7 +275,12 @@ async def repository_analyzer_node(state: ReviewState) -> dict:
         has_migrations=impact_graph["has_migrations"],
     )
 
-    await publish_agent_status(state["review_id"], "Repository Analyzer", "complete", "Determined framework and architectural impact.")
+    await publish_agent_status(
+        state["review_id"],
+        "Repository Analyzer",
+        "complete",
+        "Determined framework and architectural impact.",
+    )
     return {
         "changed_files_analysis": files_analysis,
         "impact_graph": impact_graph,
@@ -266,15 +292,27 @@ async def repository_analyzer_node(state: ReviewState) -> dict:
 # PHASE 2.5 NODE: Orchestrator Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def orchestrator_node(state: ReviewState) -> dict:
     """Runs the Orchestrator Agent to select which specialist agents to run."""
     from backend.agents.orchestrator_agent import orchestrator_agent
-    await publish_agent_status(state["review_id"], "Orchestrator Agent", "running", "Determining which specialist agents to run...")
+
+    await publish_agent_status(
+        state["review_id"],
+        "Orchestrator Agent",
+        "running",
+        "Determining which specialist agents to run...",
+    )
     res = await orchestrator_agent.run(state=state)
-    await publish_agent_status(state["review_id"], "Orchestrator Agent", "complete", "Finished agent selection.")
-    
+    await publish_agent_status(
+        state["review_id"],
+        "Orchestrator Agent",
+        "complete",
+        "Finished agent selection.",
+    )
+
     selected_agents = res.get("selected_agents", [])
-    
+
     # Broadcast skipped status for agents not selected
     agent_map = {
         "code_review": "Code Review Agent",
@@ -284,24 +322,25 @@ async def orchestrator_node(state: ReviewState) -> dict:
         "scalability": "Scalability Agent",
         "standards": "Standards Agent",
         "architecture": "Architecture Agent",
-        "blast_radius": "Blast Radius Agent"
+        "blast_radius": "Blast Radius Agent",
     }
-    
+
     for key, name in agent_map.items():
         if key not in selected_agents:
             await publish_agent_status(
-                state["review_id"], 
-                name, 
-                "skipped", 
-                "Skipped by orchestrator: Not relevant for this PR."
+                state["review_id"],
+                name,
+                "skipped",
+                "Skipped by orchestrator: Not relevant for this PR.",
             )
-            
+
     return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE 3 NODE: Code Review Agent
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def code_review_node(state: ReviewState) -> dict:
     """Runs the Code Review Agent on the PR diff."""
@@ -312,15 +351,26 @@ async def code_review_node(state: ReviewState) -> dict:
     raw_context = state.get("raw_context", "")
     human_message = build_code_review_msg(raw_context, pr_metadata)
     logger.info("Running Code Review Agent", review_id=state["review_id"])
-    await publish_agent_status(state["review_id"], "Code Review Agent", "running", "Analyzing diff for bugs and logic errors...")
+    await publish_agent_status(
+        state["review_id"],
+        "Code Review Agent",
+        "running",
+        "Analyzing diff for bugs and logic errors...",
+    )
     res = await code_review_agent.run(state=state, human_message=human_message)
-    await publish_agent_status(state["review_id"], "Code Review Agent", "complete", "Finished analyzing diff for bugs and logic errors.")
+    await publish_agent_status(
+        state["review_id"],
+        "Code Review Agent",
+        "complete",
+        "Finished analyzing diff for bugs and logic errors.",
+    )
     return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE 4 NODES: All parallel specialist agents
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def security_node(state: ReviewState) -> dict:
     """Runs the Security Agent — OWASP Top 10 and vulnerability detection."""
@@ -329,9 +379,19 @@ async def security_node(state: ReviewState) -> dict:
         return _empty_agent_result("security_agent", "security_result")
     human_message = build_security_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Security Agent", review_id=state["review_id"])
-    await publish_agent_status(state["review_id"], "Security Agent", "running", "Scanning for OWASP vulnerabilities...")
+    await publish_agent_status(
+        state["review_id"],
+        "Security Agent",
+        "running",
+        "Scanning for OWASP vulnerabilities...",
+    )
     res = await security_agent.run(state=state, human_message=human_message)
-    await publish_agent_status(state["review_id"], "Security Agent", "complete", "Finished scanning for OWASP vulnerabilities.")
+    await publish_agent_status(
+        state["review_id"],
+        "Security Agent",
+        "complete",
+        "Finished scanning for OWASP vulnerabilities.",
+    )
     return res
 
 
@@ -342,9 +402,19 @@ async def database_node(state: ReviewState) -> dict:
         return _empty_agent_result("database_agent", "database_result")
     human_message = build_database_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Database Agent", review_id=state["review_id"])
-    await publish_agent_status(state["review_id"], "Database Agent", "running", "Checking for N+1 queries and unsafe migrations...")
+    await publish_agent_status(
+        state["review_id"],
+        "Database Agent",
+        "running",
+        "Checking for N+1 queries and unsafe migrations...",
+    )
     res = await database_agent.run(state=state, human_message=human_message)
-    await publish_agent_status(state["review_id"], "Database Agent", "complete", "Finished checking for N+1 queries and unsafe migrations.")
+    await publish_agent_status(
+        state["review_id"],
+        "Database Agent",
+        "complete",
+        "Finished checking for N+1 queries and unsafe migrations.",
+    )
     return res
 
 
@@ -355,9 +425,19 @@ async def requirements_node(state: ReviewState) -> dict:
         return _empty_agent_result("requirements_agent", "requirements_result")
     human_message = build_requirements_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Requirements Agent", review_id=state["review_id"])
-    await publish_agent_status(state["review_id"], "Requirements Agent", "running", "Verifying Jira acceptance criteria compliance...")
+    await publish_agent_status(
+        state["review_id"],
+        "Requirements Agent",
+        "running",
+        "Verifying Jira acceptance criteria compliance...",
+    )
     res = await requirements_agent.run(state=state, human_message=human_message)
-    await publish_agent_status(state["review_id"], "Requirements Agent", "complete", "Finished verifying Jira acceptance criteria compliance.")
+    await publish_agent_status(
+        state["review_id"],
+        "Requirements Agent",
+        "complete",
+        "Finished verifying Jira acceptance criteria compliance.",
+    )
     return res
 
 
@@ -368,9 +448,19 @@ async def scalability_node(state: ReviewState) -> dict:
         return _empty_agent_result("scalability_agent", "scalability_result")
     human_message = build_scalability_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Scalability Agent", review_id=state["review_id"])
-    await publish_agent_status(state["review_id"], "Scalability Agent", "running", "Evaluating performance under high load...")
+    await publish_agent_status(
+        state["review_id"],
+        "Scalability Agent",
+        "running",
+        "Evaluating performance under high load...",
+    )
     res = await scalability_agent.run(state=state, human_message=human_message)
-    await publish_agent_status(state["review_id"], "Scalability Agent", "complete", "Finished evaluating performance under high load.")
+    await publish_agent_status(
+        state["review_id"],
+        "Scalability Agent",
+        "complete",
+        "Finished evaluating performance under high load.",
+    )
     return res
 
 
@@ -381,9 +471,19 @@ async def standards_node(state: ReviewState) -> dict:
         return _empty_agent_result("standards_agent", "standards_result")
     human_message = build_standards_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Standards Agent", review_id=state["review_id"])
-    await publish_agent_status(state["review_id"], "Standards Agent", "running", "Checking error handling and logging standards...")
+    await publish_agent_status(
+        state["review_id"],
+        "Standards Agent",
+        "running",
+        "Checking error handling and logging standards...",
+    )
     res = await standards_agent.run(state=state, human_message=human_message)
-    await publish_agent_status(state["review_id"], "Standards Agent", "complete", "Finished checking error handling and logging standards.")
+    await publish_agent_status(
+        state["review_id"],
+        "Standards Agent",
+        "complete",
+        "Finished checking error handling and logging standards.",
+    )
     return res
 
 
@@ -394,9 +494,19 @@ async def architecture_node(state: ReviewState) -> dict:
         return _empty_agent_result("architecture_agent", "architecture_result")
     human_message = build_architecture_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Architecture Agent", review_id=state["review_id"])
-    await publish_agent_status(state["review_id"], "Architecture Agent", "running", "Evaluating SOLID principles and design patterns...")
+    await publish_agent_status(
+        state["review_id"],
+        "Architecture Agent",
+        "running",
+        "Evaluating SOLID principles and design patterns...",
+    )
     res = await architecture_agent.run(state=state, human_message=human_message)
-    await publish_agent_status(state["review_id"], "Architecture Agent", "complete", "Finished evaluating SOLID principles and design patterns.")
+    await publish_agent_status(
+        state["review_id"],
+        "Architecture Agent",
+        "complete",
+        "Finished evaluating SOLID principles and design patterns.",
+    )
     return res
 
 
@@ -407,9 +517,19 @@ async def blast_radius_node(state: ReviewState) -> dict:
         return _empty_agent_result("blast_radius_agent", "blast_radius_result")
     human_message = build_blast_radius_msg(state.get("raw_context", ""), pr_metadata)
     logger.info("Running Blast Radius Agent", review_id=state["review_id"])
-    await publish_agent_status(state["review_id"], "Blast Radius Agent", "running", "Analyzing downstream failure impacts...")
+    await publish_agent_status(
+        state["review_id"],
+        "Blast Radius Agent",
+        "running",
+        "Analyzing downstream failure impacts...",
+    )
     res = await blast_radius_agent.run(state=state, human_message=human_message)
-    await publish_agent_status(state["review_id"], "Blast Radius Agent", "complete", "Finished analyzing downstream failure impacts.")
+    await publish_agent_status(
+        state["review_id"],
+        "Blast Radius Agent",
+        "complete",
+        "Finished analyzing downstream failure impacts.",
+    )
     return res
 
 
@@ -417,13 +537,25 @@ async def blast_radius_node(state: ReviewState) -> dict:
 # PHASE 5 NODE: Consensus Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def consensus_node(state: ReviewState) -> dict:
     """Runs the Consensus Agent to unify all findings and compute final risk score."""
     from backend.agents.consensus_agent import consensus_agent
+
     logger.info("Running Consensus Agent", review_id=state["review_id"])
-    await publish_agent_status(state["review_id"], "Consensus Agent", "running", "Merging all findings and calculating final risk score...")
+    await publish_agent_status(
+        state["review_id"],
+        "Consensus Agent",
+        "running",
+        "Merging all findings and calculating final risk score...",
+    )
     res = await consensus_agent.run(state=state)
-    await publish_agent_status(state["review_id"], "Consensus Agent", "complete", "Finished merging all findings and calculating final risk score.")
+    await publish_agent_status(
+        state["review_id"],
+        "Consensus Agent",
+        "complete",
+        "Finished merging all findings and calculating final risk score.",
+    )
     return res
 
 
@@ -431,13 +563,16 @@ async def consensus_node(state: ReviewState) -> dict:
 # PHASE 6 NODES: HITL & Output
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def hitl_node(state: ReviewState) -> dict:
     """
     Human-in-the-Loop (HITL) node.
     LangGraph pauses execution BEFORE this node runs (via interrupt_before).
     When the human approves/rejects via the API, the workflow resumes here.
     """
-    logger.info("HITL node executing (workflow resumed by human)", review_id=state["review_id"])
+    logger.info(
+        "HITL node executing (workflow resumed by human)", review_id=state["review_id"]
+    )
     # In a fully fleshed out system, we would read the human's decision from the state
     # and maybe override the recommendation or findings.
     return {"hitl_required": True}
@@ -449,24 +584,26 @@ async def output_node(state: ReviewState, config: RunnableConfig) -> dict:
     Runs after Consensus (if auto-approved) or after HITL (if manually approved).
     """
     logger.info("Running Output Node", review_id=state["review_id"])
-    
+
     consensus = state.get("consensus_result", {})
     findings = consensus.get("final_findings", [])
     github_token = config["configurable"].get("github_token")
-    
+
     try:
         from backend.tools.github_tool import post_pr_comments
+
         comment_url = await post_pr_comments(state["pr_url"], findings, github_token)
         logger.info("Successfully posted to GitHub", url=comment_url)
     except Exception as e:
         logger.error("Failed to post comments to GitHub", error=str(e))
-        
+
     return {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper: Empty agent result (used when PR metadata is missing)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _empty_agent_result(agent_name: str, result_key: str) -> dict:
     """Returns an empty result dict when an agent cannot run."""
@@ -487,15 +624,28 @@ def _empty_agent_result(agent_name: str, result_key: str) -> dict:
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _classify_file_type(filepath: str) -> str:
     """Classify file by extension."""
     ext = filepath.split(".")[-1].lower() if "." in filepath else ""
     type_map = {
-        "py": "python", "ts": "typescript", "tsx": "typescript",
-        "js": "javascript", "jsx": "javascript", "java": "java",
-        "cs": "csharp", "go": "go", "sql": "sql", "json": "config",
-        "yaml": "config", "yml": "config", "env": "config",
-        "md": "docs", "txt": "docs", "html": "template", "css": "style",
+        "py": "python",
+        "ts": "typescript",
+        "tsx": "typescript",
+        "js": "javascript",
+        "jsx": "javascript",
+        "java": "java",
+        "cs": "csharp",
+        "go": "go",
+        "sql": "sql",
+        "json": "config",
+        "yaml": "config",
+        "yml": "config",
+        "env": "config",
+        "md": "docs",
+        "txt": "docs",
+        "html": "template",
+        "css": "style",
     }
     return type_map.get(ext, "unknown")
 
@@ -547,19 +697,19 @@ def _detect_framework(changed_files: list[str]) -> str:
 def _jira_to_text(ticket: dict) -> str:
     """Converts a JiraTicket dict to a flat text string for chunking."""
     return f"""
-JIRA TICKET: {ticket['ticket_id']}
-Title: {ticket['title']}
-Status: {ticket['status']}
-Priority: {ticket['priority']}
+JIRA TICKET: {ticket["ticket_id"]}
+Title: {ticket["title"]}
+Status: {ticket["status"]}
+Priority: {ticket["priority"]}
 
 Description:
-{ticket['description']}
+{ticket["description"]}
 
 Acceptance Criteria:
-{chr(10).join(f"- {ac}" for ac in ticket['acceptance_criteria'])}
+{chr(10).join(f"- {ac}" for ac in ticket["acceptance_criteria"])}
 
 Business Rules:
-{chr(10).join(f"- {br}" for br in ticket.get('business_rules', []))}
+{chr(10).join(f"- {br}" for br in ticket.get("business_rules", []))}
 """.strip()
 
 
@@ -569,6 +719,7 @@ async def _fetch_google_doc(doc_url: str) -> str:
     NOTE: Requires Google Service Account credentials.
     """
     import re
+
     match = re.search(r"/document/d/([a-zA-Z0-9_-]+)", doc_url)
     if not match:
         return "Could not extract Google Doc ID from URL"
@@ -576,25 +727,26 @@ async def _fetch_google_doc(doc_url: str) -> str:
     doc_id = match.group(1)
 
     try:
-        from googleapiclient.discovery import build
         # TODO: Retrieve the Google access_token from ThirdPartyUserAccount using state['user_id']
         # For now, we mock or raise because service accounts are no longer supported.
-        raise NotImplementedError("Google Docs via OAuth token is not yet fully implemented in graph nodes.")
-        
+        raise NotImplementedError(
+            "Google Docs via OAuth token is not yet fully implemented in graph nodes."
+        )
+
         # When implemented, use:
         # from google.oauth2.credentials import Credentials
         # credentials = Credentials(token=user_access_token)
         # service = build("docs", "v1", credentials=credentials)
-        doc = service.documents().get(documentId=doc_id).execute()
-
-        content_parts = []
-        for element in doc.get("body", {}).get("content", []):
-            if "paragraph" in element:
-                for para_elem in element["paragraph"].get("elements", []):
-                    if "textRun" in para_elem:
-                        content_parts.append(para_elem["textRun"].get("content", ""))
-
-        return "".join(content_parts)
+        # doc = service.documents().get(documentId=doc_id).execute()
+        #
+        # content_parts = []
+        # for element in doc.get("body", {}).get("content", []):
+        #     if "paragraph" in element:
+        #         for para_elem in element["paragraph"].get("elements", []):
+        #             if "textRun" in para_elem:
+        #                 content_parts.append(para_elem["textRun"].get("content", ""))
+        #
+        # return "".join(content_parts)
 
     except Exception as e:
         logger.warning("Google Docs fetch failed", error=str(e))

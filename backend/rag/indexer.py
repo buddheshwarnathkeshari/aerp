@@ -64,7 +64,7 @@ async def index_chunks(
 
     try:
         for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
+            batch = chunks[i : i + batch_size]
             texts = [chunk.content for chunk in batch]
 
             logger.info(

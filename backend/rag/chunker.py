@@ -3,7 +3,7 @@ backend/rag/chunker.py
 
 Splits documents into chunks for embedding and storage in pgvector.
 
-WHY CHUNKING?
+Design Note: Chunking?
   Embedding models have input limits (e.g., 2048 tokens max).
   A PR diff or feature doc might be 50,000 tokens.
   We split into smaller, overlapping chunks so:
@@ -11,7 +11,7 @@ WHY CHUNKING?
     2. Semantic meaning is preserved per chunk
     3. Retrieval returns focused, relevant context
 
-WHY OVERLAP?
+Design Note: Overlap?
   A sentence at the END of chunk 1 may be contextually connected
   to the sentence at the START of chunk 2.
   Without overlap, these get split and lose their connection.
@@ -20,7 +20,6 @@ WHY OVERLAP?
   [──── chunk 1 ────][overlap][──── chunk 2 ────]
                      [overlap] = same content in both chunks
 
-INTERVIEW: "What chunking strategy do you use and why?"
   We use RecursiveCharacterTextSplitter because it tries to split on
   natural boundaries first (paragraphs → sentences → words → characters).
   This preserves semantic coherence better than fixed-size splitting.
@@ -32,9 +31,10 @@ from typing import NamedTuple
 
 class DocumentChunk(NamedTuple):
     """A single chunk ready for embedding."""
-    content: str            # The text content
-    source: str             # Where it came from: "github_pr" | "jira" | "google_doc"
-    metadata: dict          # Extra info: file_path, section, page, etc.
+
+    content: str  # The text content
+    source: str  # Where it came from: "github_pr" | "jira" | "google_doc"
+    metadata: dict  # Extra info: file_path, section, page, etc.
 
 
 # Chunking configs per document type
@@ -45,19 +45,19 @@ class DocumentChunk(NamedTuple):
 
 CHUNK_CONFIGS = {
     "github_pr": {
-        "chunk_size": 800,      # ~600 words — code is dense
+        "chunk_size": 800,  # ~600 words — code is dense
         "chunk_overlap": 100,
     },
     "jira": {
-        "chunk_size": 1500,     # Jira tickets are prose, need more context
+        "chunk_size": 1500,  # Jira tickets are prose, need more context
         "chunk_overlap": 150,
     },
     "google_doc": {
-        "chunk_size": 1500,     # Feature docs are prose
+        "chunk_size": 1500,  # Feature docs are prose
         "chunk_overlap": 150,
     },
     "repo_file": {
-        "chunk_size": 600,      # Individual files — smaller for precision
+        "chunk_size": 600,  # Individual files — smaller for precision
         "chunk_overlap": 80,
     },
 }
@@ -90,12 +90,12 @@ def chunk_document(
         # Separators tried in order — falls back to next if previous produces too-large chunks
         # This is the "recursive" in RecursiveCharacterTextSplitter
         separators=[
-            "\n\n",    # Try paragraph break first
-            "\n",      # Then line break
-            ". ",      # Then sentence
-            ", ",      # Then clause
-            " ",       # Then word
-            "",        # Last resort: character split
+            "\n\n",  # Try paragraph break first
+            "\n",  # Then line break
+            ". ",  # Then sentence
+            ", ",  # Then clause
+            " ",  # Then word
+            "",  # Last resort: character split
         ],
         length_function=len,
     )
@@ -110,11 +110,13 @@ def chunk_document(
             "source": source,
             **(metadata or {}),
         }
-        chunks.append(DocumentChunk(
-            content=text.strip(),
-            source=source,
-            metadata=chunk_metadata,
-        ))
+        chunks.append(
+            DocumentChunk(
+                content=text.strip(),
+                source=source,
+                metadata=chunk_metadata,
+            )
+        )
 
     return chunks
 
@@ -123,7 +125,7 @@ def chunk_pr_diff(diff: str, pr_metadata: dict) -> list[DocumentChunk]:
     """
     Special chunking for PR diffs — splits per file.
 
-    WHY PER FILE?
+    Design Note: Per FILE?
       A PR diff might touch 20 files. Chunking randomly across the whole diff
       would mix context from different files. Splitting per file means each
       chunk is semantically coherent (all from one file).

@@ -46,7 +46,7 @@ def get_url() -> str:
     """
     Get the database URL for Alembic (synchronous psycopg2 driver).
 
-    WHY NOT asyncpg?
+    Design Note: Not asyncpg?
       Alembic's migration runner is synchronous — it uses standard
       SQLAlchemy sessions, not AsyncSession. asyncpg only works with
       async code. We use psycopg2 for migrations only.
@@ -79,8 +79,8 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             # Include the schema in comparisons
-            compare_type=True,          # Detect column type changes
-            compare_server_default=True, # Detect default value changes
+            compare_type=True,  # Detect column type changes
+            compare_server_default=True,  # Detect default value changes
         )
         with context.begin_transaction():
             context.run_migrations()

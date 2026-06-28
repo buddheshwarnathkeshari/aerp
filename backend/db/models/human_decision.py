@@ -8,13 +8,13 @@ PURPOSE:
   the LangGraph workflow PAUSES. A human reviews the findings in the UI
   and clicks Approve or Reject. This table records that decision.
 
-WHY THIS TABLE EXISTS (compliance):
+Design Note: This TABLE EXISTS (compliance):
   Enterprise companies require proof that a human explicitly reviewed
   every high-risk AI decision before code was shipped to production.
   This is required for SOC2 compliance, ISO 27001, etc.
   Without this table, there is no verifiable audit trail.
 
-WHY reviewer_name is a snapshot:
+Design Note: reviewer_name is a snapshot
   We store the name at the time of decision (not a JOIN to users.full_name).
   If the user later changes their name, the historical record still shows
   exactly who made the decision. Audit trails must be immutable snapshots.

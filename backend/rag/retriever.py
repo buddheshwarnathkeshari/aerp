@@ -14,7 +14,6 @@ HOW SIMILARITY SEARCH WORKS:
   Cosine distance: 0 = identical, 1 = completely different.
   We ORDER BY distance ASC and take the smallest (most similar).
 
-INTERVIEW: "What is the difference between cosine similarity and L2 distance?"
   Cosine similarity measures the ANGLE between vectors (direction).
   L2 distance measures the MAGNITUDE (Euclidean distance).
   For text embeddings, cosine is preferred because:
@@ -56,7 +55,9 @@ async def retrieve_similar_chunks(
     # Embed the query
     query_vector = await embedder.aembed_query(query)
 
-    conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn_string = settings.database_url.replace(
+        "postgresql+asyncpg://", "postgresql://"
+    )
     conn = await asyncpg.connect(conn_string)
 
     try:
@@ -107,16 +108,16 @@ def build_rag_tool(review_id: str):
     """
     Creates a LangChain Tool for RAG search, bound to a specific review_id.
 
-    WHY BIND review_id?
+    Design Note: Bind review_id?
       The @tool decorator creates a function without review_id context.
       We need the tool to only search chunks from the CURRENT review.
       By creating the tool dynamically per review, we "close over" the
       review_id — this is called a closure.
 
-    INTERVIEW: "What is a closure?"
       A closure is a function that "remembers" variables from its enclosing scope.
       Here, the inner function remembers `review_id` even after `build_rag_tool` returns.
     """
+
     async def search_context(query: str, source: str | None = None) -> str:
         """
         Search the review context (PR, Jira, docs) for relevant information.

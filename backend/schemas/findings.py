@@ -1,7 +1,7 @@
 """
 backend/models/findings.py
 
-WHY PYDANTIC MODELS FOR LLM OUTPUT?
+Design Note: Pydantic MODELS FOR LLM OUTPUT?
   When we call Gemini, we could get back free-form text like:
     "There's a bug on line 42. Also, the auth is broken."
 
@@ -33,33 +33,37 @@ from enum import Enum
 # Enums — constrain values the LLM can output
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class Severity(str, Enum):
     """
     Severity of a finding.
 
-    WHY str + Enum?
+    Design Note: str + Enum
       - Enum: constrains LLM output to valid values only
       - str: makes it JSON-serializable without extra steps
       - The LLM literally cannot output "BLOCKER" or "WARNING" — only these values.
     """
-    CRITICAL = "critical"   # Must fix before merge — security hole, data loss, crash
-    HIGH = "high"           # Should fix — significant bug or vulnerability
-    MEDIUM = "medium"       # Should consider — code quality, performance concern
-    LOW = "low"             # Nice to fix — style, minor optimization
-    INFO = "info"           # Informational — no action needed
+
+    CRITICAL = "critical"  # Must fix before merge — security hole, data loss, crash
+    HIGH = "high"  # Should fix — significant bug or vulnerability
+    MEDIUM = "medium"  # Should consider — code quality, performance concern
+    LOW = "low"  # Nice to fix — style, minor optimization
+    INFO = "info"  # Informational — no action needed
 
 
 class Recommendation(str, Enum):
     """Final recommendation from an agent."""
-    APPROVE = "approve"                         # Looks good, ship it
+
+    APPROVE = "approve"  # Looks good, ship it
     APPROVE_WITH_COMMENTS = "approve_with_comments"  # Minor issues, but ok
-    REQUEST_CHANGES = "request_changes"         # Issues that need fixing
-    BLOCK = "block"                             # Critical issues — do NOT merge
+    REQUEST_CHANGES = "request_changes"  # Issues that need fixing
+    BLOCK = "block"  # Critical issues — do NOT merge
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CodeFinding — a single issue found by an agent
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class CodeFinding(BaseModel):
     """
@@ -74,67 +78,69 @@ class CodeFinding(BaseModel):
 
     title: str = Field(
         description="Short, specific title of the issue. "
-                    "Example: 'SQL Injection in user search query'. "
-                    "Maximum 80 characters. Do NOT use generic titles like 'Bug found'."
+        "Example: 'SQL Injection in user search query'. "
+        "Maximum 80 characters. Do NOT use generic titles like 'Bug found'."
     )
 
     severity: Severity = Field(
         description="How critical is this issue? "
-                    "critical=must fix, high=should fix, medium=consider fixing, "
-                    "low=minor, info=informational"
+        "critical=must fix, high=should fix, medium=consider fixing, "
+        "low=minor, info=informational"
     )
 
     confidence: float = Field(
         default=0.8,
-        ge=0.0, le=1.0,
+        ge=0.0,
+        le=1.0,
         description="Your confidence that this is a real issue, from 0.0 to 1.0. "
-                    "0.9+ = very certain. 0.5 = unsure. Be honest — "
-                    "low confidence findings won't be posted as PR comments."
+        "0.9+ = very certain. 0.5 = unsure. Be honest — "
+        "low confidence findings won't be posted as PR comments.",
     )
 
     description: str = Field(
         description="Full explanation of the problem. Include: "
-                    "1) What the issue is, "
-                    "2) Why it's a problem, "
-                    "3) What could go wrong if not fixed. "
-                    "Write for a senior engineer who will review your comment."
+        "1) What the issue is, "
+        "2) Why it's a problem, "
+        "3) What could go wrong if not fixed. "
+        "Write for a senior engineer who will review your comment."
     )
 
     file_path: Optional[str] = Field(
         default=None,
         description="File path where the issue is located. "
-                    "Example: 'backend/api/users.py'. "
-                    "None if the issue is general (not tied to a specific file)."
+        "Example: 'backend/api/users.py'. "
+        "None if the issue is general (not tied to a specific file).",
     )
 
     line_number: Optional[int] = Field(
         default=None,
         description="Line number of the issue within the file. "
-                    "None if you cannot determine the exact line."
+        "None if you cannot determine the exact line.",
     )
 
     evidence: str = Field(
         default="Not provided.",
         description="The exact code snippet or pattern you observed that led to this finding. "
-                    "Quote the relevant lines. This is your proof."
+        "Quote the relevant lines. This is your proof.",
     )
 
     suggested_fix: Optional[str] = Field(
         default=None,
         description="How to fix this issue. Include a corrected code snippet if possible. "
-                    "Be specific and actionable. None if you cannot suggest a fix."
+        "Be specific and actionable. None if you cannot suggest a fix.",
     )
 
     owasp_category: Optional[str] = Field(
         default=None,
         description="For security findings only: the OWASP Top 10 category. "
-                    "Example: 'A03:2021 - Injection'. None for non-security findings."
+        "Example: 'A03:2021 - Injection'. None for non-security findings.",
     )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AgentReport — the complete output from one agent run
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class AgentReport(BaseModel):
     """
@@ -147,15 +153,15 @@ class AgentReport(BaseModel):
 
     findings: list[CodeFinding] = Field(
         description="List of all issues found. "
-                    "If the code looks clean, return an empty list — do NOT invent issues. "
-                    "Quality over quantity. 3 real findings beat 10 vague ones."
+        "If the code looks clean, return an empty list — do NOT invent issues. "
+        "Quality over quantity. 3 real findings beat 10 vague ones."
     )
 
     overall_assessment: str = Field(
         description="A 2-3 sentence summary of the overall code quality / security posture. "
-                    "Be direct and professional. "
-                    "Example: 'The authentication logic has a critical bypass vulnerability. "
-                    "The rest of the code follows good practices.'"
+        "Be direct and professional. "
+        "Example: 'The authentication logic has a critical bypass vulnerability. "
+        "The rest of the code follows good practices.'"
     )
 
     recommendation: Recommendation = Field(
@@ -164,14 +170,16 @@ class AgentReport(BaseModel):
 
     confidence: float = Field(
         default=0.8,
-        ge=0.0, le=1.0,
-        description="Your overall confidence in this review, from 0.0 to 1.0."
+        ge=0.0,
+        le=1.0,
+        description="Your overall confidence in this review, from 0.0 to 1.0.",
     )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ConsensusReport — the final unified output from the Consensus Agent
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class ConsensusReport(BaseModel):
     """
@@ -183,12 +191,12 @@ class ConsensusReport(BaseModel):
 
     final_findings: list[CodeFinding] = Field(
         description="Deduplicated and consolidated list of the most important findings. "
-                    "Filter out noise, combine duplicates, and resolve conflicting advice."
+        "Filter out noise, combine duplicates, and resolve conflicting advice."
     )
 
     overall_assessment: str = Field(
         description="A holistic summary of the PR, synthesizing input from all specialist agents. "
-                    "Highlight the most critical areas of concern."
+        "Highlight the most critical areas of concern."
     )
 
     recommendation: Recommendation = Field(
@@ -196,9 +204,10 @@ class ConsensusReport(BaseModel):
     )
 
     risk_score: int = Field(
-        ge=0, le=100,
+        ge=0,
+        le=100,
         description="Overall risk score from 0 to 100. "
-                    "0 = perfectly safe, no issues. "
-                    "100 = absolutely critical, must not be deployed. "
-                    "Calculate this intelligently based on the severity and impact of the final_findings."
+        "0 = perfectly safe, no issues. "
+        "100 = absolutely critical, must not be deployed. "
+        "Calculate this intelligently based on the severity and impact of the final_findings.",
     )

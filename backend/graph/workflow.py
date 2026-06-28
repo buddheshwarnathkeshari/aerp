@@ -42,7 +42,6 @@ HOW PARALLEL EXECUTION WORKS IN LANGGRAPH:
     reducer:  each agent appends to agent_findings
     fan-in:   collector_node reads the merged agent_findings
 
-INTERVIEW: "How do you run LangGraph nodes in parallel?"
   "LangGraph supports parallel execution by adding multiple edges from
   one node to multiple destination nodes. When a node has parallel
   outgoing edges, LangGraph runs all destinations concurrently.
@@ -53,7 +52,6 @@ INTERVIEW: "How do you run LangGraph nodes in parallel?"
 """
 
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.redis import RedisSaver
 from backend.graph.state import ReviewState
 from backend.graph.nodes import (
     # Phase 2
@@ -102,10 +100,11 @@ def route_agents(state: ReviewState) -> list[str]:
     if not selected:
         # Fallback: run all agents
         return AGENT_NODES
-    
+
     # Ensure we only route to valid agent nodes
     valid_agents = [agent for agent in selected if agent in AGENT_NODES]
     return valid_agents if valid_agents else AGENT_NODES
+
 
 def route_after_consensus(state: ReviewState) -> str:
     """
@@ -113,6 +112,7 @@ def route_after_consensus(state: ReviewState) -> str:
     If risk_score > 40, go to HITL. Otherwise, Auto-Approve (go to Output).
     """
     import structlog
+
     logger = structlog.get_logger()
 
     result = state.get("consensus_result", {})
@@ -150,7 +150,7 @@ def create_workflow(checkpointer=None):
 
     # Phase 5 Consensus
     builder.add_node("consensus", consensus_node)
-    
+
     # Phase 6 HITL and Output
     builder.add_node("hitl", hitl_node)
     builder.add_node("output", output_node)
@@ -162,9 +162,7 @@ def create_workflow(checkpointer=None):
 
     # FAN-OUT: orchestrator → [selected agents]
     builder.add_conditional_edges(
-        "orchestrator",
-        route_agents,
-        {node: node for node in AGENT_NODES}
+        "orchestrator", route_agents, {node: node for node in AGENT_NODES}
     )
 
     # FAN-IN: [8 agents] → consensus
@@ -178,7 +176,7 @@ def create_workflow(checkpointer=None):
         {
             "hitl": "hitl",
             "output": "output",
-        }
+        },
     )
 
     builder.add_edge("hitl", "output")

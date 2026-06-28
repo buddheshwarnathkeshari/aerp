@@ -54,16 +54,16 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
     return f"""Review this pull request for architectural concerns.
 
 ## Pull Request Details
-**Title**: {pr_metadata.get('title', 'N/A')}
-**Repository**: {pr_metadata.get('repo_owner', '')}/{pr_metadata.get('repo_name', '')}
-**Changed files**: {', '.join(pr_metadata.get('changed_files', [])[:10])}
+**Title**: {pr_metadata.get("title", "N/A")}
+**Repository**: {pr_metadata.get("repo_owner", "")}/{pr_metadata.get("repo_name", "")}
+**Changed files**: {", ".join(pr_metadata.get("changed_files", [])[:10])}
 
 ## Context
 {raw_context[:2000]}
 
 ## Full Diff
 ```diff
-{pr_metadata.get('diff', 'No diff available')[:8000]}
+{pr_metadata.get("diff", "No diff available")[:8000]}
 ```
 
 Focus on SOLID principles, layer violations, coupling, and long-term maintainability. \

@@ -1,4 +1,3 @@
-"""backend/agents/standards_agent.py"""
 from backend.agents.base_agent import BaseAgent
 from backend.prompts.standards import SYSTEM_PROMPT
 

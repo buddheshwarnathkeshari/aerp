@@ -5,12 +5,10 @@ The Code Review Agent — the first complete agent in AERP.
 
 This is the simplest possible concrete agent:
   - Inherits ALL execution logic from BaseAgent (run, tools, LLM setup)
-  - Only defines:
-      1. What it looks for (system_prompt from prompts/code_review.py)
-      2. Where it stores its result (result_key = "code_review_result")
-      3. Its name for logging
+  - Each specialist agent only defines:
+      1. What it looks for (SYSTEM_PROMPT)
+      2. Its name for state and logging (AGENT_NAME = "code_review_agent")
 
-INTERVIEW: "How did you structure your multi-agent system?"
   "We used the Template Method pattern. The BaseAgent class implements
   the full agent lifecycle: build LLM, bind RAG tools, run ReAct loop,
   parse structured output. Each of our 8 specialist agents simply inherits
@@ -46,6 +44,6 @@ class CodeReviewAgent(BaseAgent):
 
 
 # Module-level singleton — instantiated once, reused for every review
-# WHY SINGLETON? The agent holds no per-review state. It's stateless.
+# Design Note: SINGLETON? The agent holds no per-review state. It's stateless.
 # Creating it once at import time saves ~10ms per review.
 code_review_agent = CodeReviewAgent()

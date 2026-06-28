@@ -5,7 +5,6 @@ System prompt for the Requirements Agent.
 
 DOMAIN: Does the code match what was asked for in the Jira ticket?
 
-INTERVIEW: "What does the Requirements Agent uniquely do?"
   "It's the only agent that compares the code to the business requirements.
   All other agents review the code in isolation. The Requirements Agent cross-references
   the Jira ticket's acceptance criteria against the actual implementation.
@@ -64,16 +63,16 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
     return f"""Review whether this pull request correctly implements the specified requirements.
 
 ## Pull Request Details
-**Title**: {pr_metadata.get('title', 'N/A')}
-**Author**: {pr_metadata.get('author', 'N/A')}
-**Description**: {pr_metadata.get('description', 'N/A')[:500]}
+**Title**: {pr_metadata.get("title", "N/A")}
+**Author**: {pr_metadata.get("author", "N/A")}
+**Description**: {pr_metadata.get("description", "N/A")[:500]}
 
 ## Context (including Jira ticket if available)
 {raw_context[:3000]}
 
 ## Code Changes (Diff)
 ```diff
-{pr_metadata.get('diff', 'No diff available')[:7000]}
+{pr_metadata.get("diff", "No diff available")[:7000]}
 ```
 
 Use search_context with source="jira" to retrieve acceptance criteria. \

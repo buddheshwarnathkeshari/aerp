@@ -68,7 +68,9 @@ async def fetch_jira_ticket(jira_url: str) -> dict:
         "story_points": getattr(issue.fields, "story_points", None),
         "priority": issue.fields.priority.name if issue.fields.priority else "Medium",
         "status": issue.fields.status.name,
-        "reporter": issue.fields.reporter.displayName if issue.fields.reporter else "Unknown",
+        "reporter": issue.fields.reporter.displayName
+        if issue.fields.reporter
+        else "Unknown",
         "linked_tickets": _get_linked_tickets(issue),
     }
 
@@ -103,7 +105,9 @@ def _extract_acceptance_criteria(description: str) -> list[str]:
         if match not in criteria:
             criteria.append(match.strip())
 
-    return criteria if criteria else ["No structured acceptance criteria found in ticket"]
+    return (
+        criteria if criteria else ["No structured acceptance criteria found in ticket"]
+    )
 
 
 def _get_linked_tickets(issue) -> list[str]:
@@ -119,6 +123,7 @@ def _get_linked_tickets(issue) -> list[str]:
 
 
 # ── LangChain Tool (for Requirements Agent) ────────────────────────────────
+
 
 @tool
 def jira_get_ticket_details(ticket_key: str) -> str:
@@ -142,13 +147,13 @@ def jira_get_ticket_details(ticket_key: str) -> str:
 JIRA TICKET: {ticket_key}
 Title: {issue.fields.summary}
 Status: {issue.fields.status.name}
-Priority: {issue.fields.priority.name if issue.fields.priority else 'N/A'}
+Priority: {issue.fields.priority.name if issue.fields.priority else "N/A"}
 
 DESCRIPTION:
 {description[:2000]}  
 
 ACCEPTANCE CRITERIA:
-{chr(10).join(f'  {i+1}. {c}' for i, c in enumerate(criteria))}
+{chr(10).join(f"  {i + 1}. {c}" for i, c in enumerate(criteria))}
 """
         return output.strip()
     except JIRAError as e:

@@ -3,7 +3,7 @@ backend/db/models/pull_request.py
 
 PullRequest ORM model — replaces the old 'reviews' table.
 
-WHY RENAMED FROM 'reviews' TO 'pull_requests'?
+Design Note: Renamed FROM 'reviews' TO 'pull_requests'?
   'reviews' was ambiguous — is it a code review or a product review?
   'pull_requests' is precise: a row here represents one GitHub PR
   submitted for AI analysis. The "review" is what the AI DOES to it.

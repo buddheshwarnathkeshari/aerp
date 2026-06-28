@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     Code before `yield` runs on startup.
     Code after `yield` runs on shutdown.
 
-    WHY lifespan instead of @app.on_event("startup")?
+    Design Note: lifespan instead of @app.on_event("startup")
     on_event is deprecated in FastAPI 0.93+. lifespan is the modern approach.
     It uses async context managers — cleaner and more Pythonic.
     """
@@ -39,7 +39,9 @@ async def lifespan(app: FastAPI):
     # Verify database connectivity on startup
     # If this fails, the app fails fast — better than failing on first request
     try:
-        conn_string = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+        conn_string = settings.database_url.replace(
+            "postgresql+asyncpg://", "postgresql://"
+        )
         conn = await asyncpg.connect(conn_string)
         await conn.fetchval("SELECT 1")  # Simple connectivity test
         await conn.close()
@@ -69,12 +71,14 @@ app = FastAPI(
 
 # ── CORS Middleware ───────────────────────────────────────────────────────────
 # Required so the React frontend (port 3000) can call the API (port 8000)
-# WHY CORS?
+# Design Note: CORS?
 # Browsers block cross-origin requests by default (security).
 # CORS headers tell the browser: "this origin is allowed to call this API"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"] if settings.is_development else [],
+    allow_origins=["http://localhost:3000", "http://localhost:5173"]
+    if settings.is_development
+    else [],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,7 +87,7 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key or "super_secret_session_key",
-    max_age=3600 # 1 hour is plenty for OAuth flows
+    max_age=3600,  # 1 hour is plenty for OAuth flows
 )
 
 # ── Register routes ───────────────────────────────────────────────────────────

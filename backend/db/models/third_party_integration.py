@@ -11,11 +11,10 @@ CURRENT ROWS (3):
   name='jira'    display_name='Jira Cloud'      auth_type='oauth2'
   name='google'  display_name='Google Workspace' auth_type='oauth2'
 
-WHY A SEPARATE TABLE INSTEAD OF HARDCODING IN CODE?
+Design Note: A SEPARATE TABLE INSTEAD OF HARDCODING IN CODE?
   - Adding Slack/Linear/Confluence in the future = one INSERT, zero code change
   - Integration metadata (logo URL, docs URL, scopes) lives in one place
   - Can disable an integration platform-wide: SET is_enabled = FALSE
-  - Interviewers love this pattern: "data-driven configuration"
 
 COMPARISON WITH POD CODEBASE:
   Your POD codebase has ThirdPartyIntegration with name, class_path, logo.

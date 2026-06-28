@@ -3,7 +3,7 @@ backend/db/models/embedding.py
 
 Embedding ORM model — the RAG vector store.
 
-WHY THIS IS DIFFERENT FROM ALL OTHER MODELS:
+Design Note: This IS DIFFERENT FROM ALL OTHER MODELS:
   Every other model uses standard SQL types (Text, Integer, UUID).
   This model uses the `vector` type from the pgvector extension —
   a PostgreSQL-specific type that doesn't exist in standard SQLAlchemy.
@@ -109,4 +109,6 @@ class Embedding(Base, TimestampMixin):
     )
 
     def __repr__(self) -> str:
-        return f"<Embedding pull_request_id={self.pull_request_id} source={self.source}>"
+        return (
+            f"<Embedding pull_request_id={self.pull_request_id} source={self.source}>"
+        )

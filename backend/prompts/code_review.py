@@ -3,7 +3,7 @@ backend/prompts/code_review.py
 
 The system prompt for the Code Review Agent.
 
-WHY IS PROMPT ENGINEERING A SEPARATE FILE?
+Design Note: Is PROMPT ENGINEERING A SEPARATE FILE?
   Prompts are code. They should be versioned, reviewed, and iterated.
   Keeping prompts in a dedicated file means:
   - You can A/B test different prompts without touching agent logic
@@ -17,7 +17,6 @@ WHAT MAKES A GOOD AGENT SYSTEM PROMPT?
   4. Clear FORMAT HINT: Remind the LLM about structured output
   5. EXAMPLES: Show 1-2 examples of good vs bad findings (few-shot)
 
-INTERVIEW: "How do you improve agent output quality?"
   Answer: Prompt engineering. Specifically:
   - Role prompting ("You are a senior engineer at Google")
   - Chain-of-thought ("Think step by step before deciding")
@@ -25,7 +24,6 @@ INTERVIEW: "How do you improve agent output quality?"
   - Few-shot examples (show the desired output format)
   - Negative constraints ("Do NOT flag style issues")
 """
-
 
 SYSTEM_PROMPT = """You are a Principal Software Engineer at a top-tier technology company, \
 conducting a thorough code review. You have 10+ years of experience and have reviewed \
@@ -78,7 +76,7 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
     """
     Builds the human-turn message containing the actual PR data.
 
-    WHY SEPARATE SYSTEM vs HUMAN MESSAGES?
+    Design Note: Separate SYSTEM vs HUMAN MESSAGES?
       In chat-based LLMs (like Gemini), messages have roles:
       - "system": persistent instructions (who you are, what to do)
       - "human": the actual task for this invocation
@@ -98,10 +96,10 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
     return f"""Please review the following pull request.
 
 ## Pull Request Details
-**Title**: {pr_metadata.get('title', 'N/A')}
-**Author**: {pr_metadata.get('author', 'N/A')}
-**Branch**: {pr_metadata.get('branch', 'N/A')} → {pr_metadata.get('base_branch', 'main')}
-**Repository**: {pr_metadata.get('repo_owner', '')}/{pr_metadata.get('repo_name', '')}
+**Title**: {pr_metadata.get("title", "N/A")}
+**Author**: {pr_metadata.get("author", "N/A")}
+**Branch**: {pr_metadata.get("branch", "N/A")} → {pr_metadata.get("base_branch", "main")}
+**Repository**: {pr_metadata.get("repo_owner", "")}/{pr_metadata.get("repo_name", "")}
 
 ## Changed Files ({len(changed_files)} files)
 {files_summary}
@@ -111,7 +109,7 @@ def build_human_message(raw_context: str, pr_metadata: dict) -> str:
 
 ## Full Diff
 ```diff
-{pr_metadata.get('diff', 'No diff available')[:8000]}
+{pr_metadata.get("diff", "No diff available")[:8000]}
 ```
 
 Now review this PR. Use your search_context tool if you need to look up \

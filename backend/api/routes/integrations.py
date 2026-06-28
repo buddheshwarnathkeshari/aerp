@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Any, List
@@ -12,6 +12,7 @@ from backend.utils.encryption import encrypt_token
 
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
 
+
 class IntegrationResponse(BaseModel):
     name: str
     display_name: str
@@ -19,13 +20,14 @@ class IntegrationResponse(BaseModel):
     logo_url: str | None
     is_connected: bool
 
+
 class ConnectRequest(BaseModel):
     access_token: str
 
+
 @router.get("", response_model=List[IntegrationResponse])
 async def list_integrations(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> Any:
     """List all available integrations and whether the user is connected to them."""
     # Get all enabled integrations
@@ -36,41 +38,44 @@ async def list_integrations(
     # Get the user's connected integrations
     stmt_accounts = select(ThirdPartyUserAccount.integration_id).where(
         ThirdPartyUserAccount.user_id == current_user.id,
-        ThirdPartyUserAccount.is_active == True
+        ThirdPartyUserAccount.is_active == True,
     )
     result_accounts = await db.execute(stmt_accounts)
     connected_ids = set(result_accounts.scalars().all())
 
     response = []
     for inc in integrations:
-        response.append({
-            "name": inc.name,
-            "display_name": inc.display_name,
-            "description": inc.description,
-            "logo_url": inc.logo_url,
-            "is_connected": inc.id in connected_ids
-        })
+        response.append(
+            {
+                "name": inc.name,
+                "display_name": inc.display_name,
+                "description": inc.description,
+                "logo_url": inc.logo_url,
+                "is_connected": inc.id in connected_ids,
+            }
+        )
     return response
+
 
 @router.post("/{name}/pat")
 async def connect_integration_pat(
     name: str,
     req: ConnectRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Connect a third-party integration using a Personal Access Token."""
     # Find integration
     stmt = select(ThirdPartyIntegration).where(ThirdPartyIntegration.name == name)
     integration = (await db.execute(stmt)).scalar_one_or_none()
-    
+
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
 
     # Check if already connected
     stmt_acc = select(ThirdPartyUserAccount).where(
         ThirdPartyUserAccount.user_id == current_user.id,
-        ThirdPartyUserAccount.integration_id == integration.id
+        ThirdPartyUserAccount.integration_id == integration.id,
     )
     account = (await db.execute(stmt_acc)).scalar_one_or_none()
 
@@ -84,29 +89,30 @@ async def connect_integration_pat(
             user_id=current_user.id,
             integration_id=integration.id,
             access_token_encrypted=encrypted,
-            credentials={}
+            credentials={},
         )
         db.add(account)
 
     await db.commit()
     return {"message": f"Successfully connected to {integration.display_name}"}
 
+
 @router.delete("/{name}")
 async def disconnect_integration(
     name: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Disconnect a third-party integration."""
     stmt = select(ThirdPartyIntegration).where(ThirdPartyIntegration.name == name)
     integration = (await db.execute(stmt)).scalar_one_or_none()
-    
+
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
 
     stmt_acc = select(ThirdPartyUserAccount).where(
         ThirdPartyUserAccount.user_id == current_user.id,
-        ThirdPartyUserAccount.integration_id == integration.id
+        ThirdPartyUserAccount.integration_id == integration.id,
     )
     account = (await db.execute(stmt_acc)).scalar_one_or_none()
 

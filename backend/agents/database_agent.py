@@ -1,4 +1,3 @@
-"""backend/agents/database_agent.py"""
 from backend.agents.base_agent import BaseAgent
 from backend.prompts.database import SYSTEM_PROMPT
 

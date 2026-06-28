@@ -27,27 +27,33 @@ The `final_findings` list should contain only the most important, deduplicated i
 """
 
 
-def build_human_message(raw_context: str, pr_metadata: dict, agent_findings: list) -> str:
+def build_human_message(
+    raw_context: str, pr_metadata: dict, agent_findings: list
+) -> str:
     # Format the raw findings for the LLM
     formatted_findings = []
     for f in agent_findings:
         formatted_findings.append(f"""
 ---
-Agent: {f.get('agent', 'Unknown')}
-Severity: {f.get('severity')}
-Confidence: {f.get('confidence')}
-Title: {f.get('title')}
-Description: {f.get('description')}
-File/Line: {f.get('file_path')}:{f.get('line_number')}
+Agent: {f.get("agent", "Unknown")}
+Severity: {f.get("severity")}
+Confidence: {f.get("confidence")}
+Title: {f.get("title")}
+Description: {f.get("description")}
+File/Line: {f.get("file_path")}:{f.get("line_number")}
 """)
-    
-    findings_str = "\n".join(formatted_findings) if formatted_findings else "No findings from any agent."
+
+    findings_str = (
+        "\n".join(formatted_findings)
+        if formatted_findings
+        else "No findings from any agent."
+    )
 
     return f"""Consolidate the findings from the 8 specialist agents.
 
 ## Pull Request Details
-**Title**: {pr_metadata.get('title', 'N/A')}
-**Repository**: {pr_metadata.get('repo_owner', '')}/{pr_metadata.get('repo_name', '')}
+**Title**: {pr_metadata.get("title", "N/A")}
+**Repository**: {pr_metadata.get("repo_owner", "")}/{pr_metadata.get("repo_name", "")}
 
 ## Raw Agent Findings ({len(agent_findings)} total)
 {findings_str}

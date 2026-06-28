@@ -3,7 +3,7 @@ backend/db/models/comment.py
 
 Comment ORM model — replaces the old 'agent_findings' table.
 
-WHY RENAMED FROM 'agent_findings' TO 'comments'?
+Design Note: Renamed FROM 'agent_findings' TO 'comments'?
   'Comments' is the exact term GitHub uses. When we post findings to GitHub,
   they become PR review comments. The name 'comments' makes this mapping
   obvious and aligns with domain language.
@@ -85,7 +85,9 @@ class Comment(Base, TimestampMixin):
         Text, nullable=False, comment="Full explanation: what, why, impact."
     )
     evidence: Mapped[str] = mapped_column(
-        Text, nullable=False, comment="The exact code snippet that triggered this finding."
+        Text,
+        nullable=False,
+        comment="The exact code snippet that triggered this finding.",
     )
     suggested_fix: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="Corrected code snippet or remediation steps."

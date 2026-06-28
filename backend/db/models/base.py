@@ -3,7 +3,7 @@ backend/db/models/base.py
 
 Base class and TimestampMixin for all SQLAlchemy ORM models.
 
-WHY A MIXIN?
+Design Note: A MIXIN?
   Instead of repeating created_at and updated_at in every table,
   we define them once here. Every model inherits from TimestampMixin
   and gets those columns for free.
@@ -11,7 +11,7 @@ WHY A MIXIN?
   This is pure Python OOP — mixins have nothing to do with Django or FastAPI.
   They work the same way in any Python codebase.
 
-WHY DeclarativeBase (SQLAlchemy 2.0 style)?
+Design Note: DeclarativeBase (SQLAlchemy 2.0 style)?
   SQLAlchemy 2.0 replaced the old `declarative_base()` function with
   the `DeclarativeBase` class. The new style provides better type hints
   and IDE support.
@@ -30,6 +30,7 @@ class Base(DeclarativeBase):
     - Alembic can discover them for migration generation
     - SQLAlchemy knows which engine to use for queries
     """
+
     pass
 
 
@@ -47,11 +48,12 @@ class TimestampMixin:
         onupdate=func.now()        → DB updates the value on every UPDATE
         This means you NEVER have to manually set these fields.
 
-    WHY timezone=True?
+    Design Note: timezone=True
         Always store timestamps in UTC with timezone info.
         Without this, you get "naive" datetimes that cause bugs
         when your app or DB runs in different timezones.
     """
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

@@ -86,9 +86,10 @@ async def fetch_pr_data(pr_url: str, github_token: str) -> dict:
     changed_files = [f.filename for f in pr.get_files()]
 
     # Get full diff
-    # WHY get the diff? Agents need to see exactly what changed line-by-line.
+    # Design Note: get the diff? Agents need to see exactly what changed line-by-line.
     # The diff is the primary input for Code Review, Security, and DB agents.
     import httpx
+
     async with httpx.AsyncClient(follow_redirects=True) as client:
         response = await client.get(
             pr.diff_url,
@@ -120,7 +121,9 @@ async def post_pr_comments(pr_url: str, findings: list, github_token: str) -> st
     Posts the final review findings as a general issue comment on the PR.
     """
     owner, repo_name, pr_number = parse_pr_url(pr_url)
-    logger.info("Posting review comments to GitHub", owner=owner, repo=repo_name, pr=pr_number)
+    logger.info(
+        "Posting review comments to GitHub", owner=owner, repo=repo_name, pr=pr_number
+    )
 
     if owner == "fake":
         logger.info("Mock PR detected. Skipping actual GitHub API call.")
@@ -139,11 +142,11 @@ async def post_pr_comments(pr_url: str, findings: list, github_token: str) -> st
             severity = getattr(finding, "severity", "medium").upper()
             desc = getattr(finding, "description", "")
             file_path = getattr(finding, "file_path", "General")
-            
+
             body += f"### [{severity}] {title}\n"
             body += f"**File:** `{file_path}`\n\n"
             body += f"{desc}\n\n"
-            
+
             if hasattr(finding, "evidence") and finding.evidence:
                 body += f"**Evidence:**\n```\n{finding.evidence}\n```\n\n"
 
@@ -155,19 +158,24 @@ async def post_pr_comments(pr_url: str, findings: list, github_token: str) -> st
         logger.error("Failed to post comment", error=str(e))
         return f"Error: {e.data}"
 
-async def post_single_finding_comment(pr_url: str, finding: dict, github_token: str) -> str:
+
+async def post_single_finding_comment(
+    pr_url: str, finding: dict, github_token: str
+) -> str:
     """
     Posts a single review finding to the PR.
     Attempts an inline review comment if file_path and line_number are available.
     Falls back to a general issue comment if the line is outside the PR diff.
     """
     owner, repo_name, pr_number = parse_pr_url(pr_url)
-    logger.info("Posting single finding to GitHub", owner=owner, repo=repo_name, pr=pr_number)
+    logger.info(
+        "Posting single finding to GitHub", owner=owner, repo=repo_name, pr=pr_number
+    )
 
     if owner == "fake":
         logger.info("Mock PR detected. Skipping actual GitHub API call.")
         return "https://github.com/fake/repo/pull/1#issuecomment-fake"
-    
+
     gh = get_github_client(github_token)
     repo = gh.get_repo(f"{owner}/{repo_name}")
     pr = repo.get_pull(pr_number)
@@ -180,37 +188,39 @@ async def post_single_finding_comment(pr_url: str, finding: dict, github_token: 
         severity = finding.get("severity", "medium").upper()
         desc = finding.get("description", "")
         file_path = finding.get("file_path", "General")
-        
-        body = f"## AERP AI Review Finding\n\n"
+
+        body = "## AERP AI Review Finding\n\n"
         body += f"### [{severity}] {title}\n"
         body += f"**File:** `{file_path}`\n\n"
         body += f"{desc}\n\n"
-        
+
         if finding.get("evidence"):
             body += f"**Evidence:**\n```\n{finding['evidence']}\n```\n\n"
 
     # Try to post inline comment if file and line are provided
     file_path = finding.get("file_path")
     line_number = finding.get("line_number")
-    
+
     if file_path and file_path != "General" and line_number:
         try:
             # get latest commit in the PR
             commits = pr.get_commits()
             latest_commit = commits.reversed[0]
-            
+
             # create_review_comment using line (requires PyGithub >= 1.55)
             comment = pr.create_review_comment(
-                body=body,
-                commit=latest_commit,
-                path=file_path,
-                line=int(line_number)
+                body=body, commit=latest_commit, path=file_path, line=int(line_number)
             )
-            logger.info("Inline review comment posted successfully", url=comment.html_url)
+            logger.info(
+                "Inline review comment posted successfully", url=comment.html_url
+            )
             return comment.html_url
         except GithubException as e:
             # 422 usually means the line is not part of the PR diff
-            logger.warning("Failed to post inline comment (likely outside diff). Falling back to general issue comment.", error=str(e))
+            logger.warning(
+                "Failed to post inline comment (likely outside diff). Falling back to general issue comment.",
+                error=str(e),
+            )
             # Fall through to post as general issue comment
 
     # Fallback to general issue comment
@@ -222,13 +232,16 @@ async def post_single_finding_comment(pr_url: str, finding: dict, github_token: 
         logger.error("Failed to post comment", error=str(e))
         return f"Error: {e.data}"
 
-async def get_file_content(repo_owner: str, repo_name: str, file_path: str, branch: str, github_token: str) -> str:
+
+async def get_file_content(
+    repo_owner: str, repo_name: str, file_path: str, branch: str, github_token: str
+) -> str:
     """
     Fetches the raw content of a specific file from a GitHub repository.
     """
     if repo_owner == "fake":
         return f"# Mock content for {file_path}\ndef mock_func():\n    pass\n"
-        
+
     gh = get_github_client(github_token)
     try:
         repo = gh.get_repo(f"{repo_owner}/{repo_name}")
@@ -239,41 +252,54 @@ async def get_file_content(repo_owner: str, repo_name: str, file_path: str, bran
         logger.error("Failed to fetch file content", file_path=file_path, error=str(e))
         return ""
 
-async def create_pull_request(repo_owner: str, repo_name: str, branch_name: str, base_branch: str, title: str, body: str, files: dict, github_token: str) -> str:
+
+async def create_pull_request(
+    repo_owner: str,
+    repo_name: str,
+    branch_name: str,
+    base_branch: str,
+    title: str,
+    body: str,
+    files: dict,
+    github_token: str,
+) -> str:
     """
     Creates a new branch, commits the given files, and opens a Pull Request.
     `files` is a dict of {filepath: content}
     """
-    logger.info("Creating new Pull Request", repo=f"{repo_owner}/{repo_name}", branch=branch_name)
+    logger.info(
+        "Creating new Pull Request",
+        repo=f"{repo_owner}/{repo_name}",
+        branch=branch_name,
+    )
     if repo_owner == "fake":
-        logger.info("Mock PR detected. Skipping actual GitHub API call for PR creation.")
-        return f"https://github.com/fake/repo/pull/999"
-        
+        logger.info(
+            "Mock PR detected. Skipping actual GitHub API call for PR creation."
+        )
+        return "https://github.com/fake/repo/pull/999"
+
     gh = get_github_client(github_token)
     try:
         repo = gh.get_repo(f"{repo_owner}/{repo_name}")
-        
+
         # 1. Get base branch commit SHA
         base = repo.get_branch(base_branch)
-        
+
         # 2. Create new branch
         repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=base.commit.sha)
-        
+
         # 3. Commit files
         for file_path, content in files.items():
             repo.create_file(
                 path=file_path,
                 message=f"Auto-generated {file_path}",
                 content=content,
-                branch=branch_name
+                branch=branch_name,
             )
-            
+
         # 4. Open PR
         pr = repo.create_pull(
-            title=title,
-            body=body,
-            head=branch_name,
-            base=base_branch
+            title=title, body=body, head=branch_name, base=base_branch
         )
         logger.info("Pull Request created successfully", url=pr.html_url)
         return pr.html_url
@@ -281,11 +307,20 @@ async def create_pull_request(repo_owner: str, repo_name: str, branch_name: str,
         logger.error("Failed to create PR", error=str(e))
         return f"Error: {e.data}"
 
+
 # ── LangChain Tools (for agent use) ──────────────────────────────────────────
 # These tools are given to agents so they can fetch specific data on demand.
 
+
 @tool
-def github_get_file_content(owner: str, repo: str, file_path: str, ref: str = "main", *, config: RunnableConfig = None) -> str:
+def github_get_file_content(
+    owner: str,
+    repo: str,
+    file_path: str,
+    ref: str = "main",
+    *,
+    config: RunnableConfig = None,
+) -> str:
     """
     Fetch the full content of a specific file from a GitHub repository.
     Use when you need to see the complete file, not just the diff.
@@ -310,7 +345,9 @@ def github_get_file_content(owner: str, repo: str, file_path: str, ref: str = "m
 
 
 @tool
-def github_search_code(owner: str, repo: str, query: str, *, config: RunnableConfig = None) -> str:
+def github_search_code(
+    owner: str, repo: str, query: str, *, config: RunnableConfig = None
+) -> str:
     """
     Search for code patterns across a GitHub repository.
     Use to find usages of a function, class, or pattern across the codebase.
@@ -349,7 +386,7 @@ def github_post_pr_comment(
     path: str,
     position: int,
     *,
-    config: RunnableConfig = None
+    config: RunnableConfig = None,
 ) -> str:
     """
     Post a review comment on a specific line of the GitHub PR.

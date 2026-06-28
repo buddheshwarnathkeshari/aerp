@@ -2,11 +2,11 @@
 backend/agents/base_agent.py
 
 Abstract base class that ALL specialist agents inherit from.
-each agent only needs to define:
-    - Its system prompt  (WHAT to look for)
-    - Its result_key    (WHERE in ReviewState to store results)
+Each agent only needs to define:
+    - Its AGENT_NAME     (e.g. "security_agent")
+    - Its SYSTEM_PROMPT  (WHAT to look for)
 
-WHY AN ABSTRACT BASE CLASS?
+Design Note: An ABSTRACT BASE CLASS?
   All agents (Code Review, Security, Requirements, etc.) share the same
   "lifecycle":
     1. Build the LLM with structured output
@@ -19,18 +19,13 @@ WHY AN ABSTRACT BASE CLASS?
 DESIGN PATTERNS USED HERE:
   1. Template Method Pattern:
      The base class defines the algorithm (run()).
-     Subclasses override specific steps (SYSTEM_PROMPT, result_key).
+     Subclasses override specific steps (AGENT_NAME, SYSTEM_PROMPT).
 
   2. Strategy Pattern (via LangChain):
      The LLM is swappable — you could swap Gemini for Claude/GPT-4
      without changing any agent code.
 
-INTERVIEW: "What design patterns do you use in production?"
-  "I use the Template Method pattern for our AI agent base class.
-  All 8 specialist agents share the same execution lifecycle (fetch context,
-  invoke LLM, parse structured output, store result). The base class
-  implements this once. Each agent only overrides the prompt and result key.
-  This reduced agent code by ~80% and makes adding a new agent a 20-line task."
+
 
 HOW ReAct AGENTS WORK:
   ReAct = Reasoning + Acting (from the 2022 paper by Yao et al.)
@@ -48,11 +43,8 @@ HOW ReAct AGENTS WORK:
 
 import time
 from abc import ABC
-from typing import Any
 
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain import hub
 
 from backend.schemas.findings import AgentReport
 from backend.rag.retriever import build_rag_tool
@@ -96,6 +88,7 @@ class BaseAgent(ABC):
         Creates the LLM configured for structured output via llm_factory.
         """
         from backend.utils.llm_factory import get_llm
+
         llm = get_llm(temperature=0.0)
         if not llm:
             raise ValueError("Failed to initialize LLM. Check API keys.")
@@ -109,7 +102,7 @@ class BaseAgent(ABC):
         Currently: just the RAG search tool (search_context).
         Future: could add static analysis tools, AST parsers, etc.
 
-        WHY build tools per-review?
+        Design Note: build tools per-review
           The search_context tool must be scoped to the CURRENT review's
           embeddings in pgvector. We "close over" the review_id
           when creating the tool — this is a Python closure.
@@ -161,6 +154,7 @@ class BaseAgent(ABC):
             # For agents with tools: use bind_tools to enable tool calling
             # The LLM will autonomously decide when to call search_context
             from backend.utils.llm_factory import get_llm
+
             base_llm = get_llm(temperature=0.0)
             llm_with_tools = base_llm.bind_tools(tools)
 
@@ -168,14 +162,19 @@ class BaseAgent(ABC):
             # We implement a simple loop: first get tool calls, execute, then
             # call the structured output LLM with the enriched context.
             from backend.utils.pubsub import publish_agent_status
-            
-            await publish_agent_status(review_id, self.AGENT_NAME, "running", "Reasoning and determining needed context...")
-            
+
+            await publish_agent_status(
+                review_id,
+                self.AGENT_NAME.replace("_", " ").title(),
+                "running",
+                "Reasoning and determining needed context...",
+            )
+
             tool_results = []
             tool_response = await llm_with_tools.ainvoke(messages)
 
             # Execute any tool calls the LLM requested
-            if hasattr(tool_response, 'tool_calls') and tool_response.tool_calls:
+            if hasattr(tool_response, "tool_calls") and tool_response.tool_calls:
                 for tool_call in tool_response.tool_calls[:5]:  # max 5 tool calls
                     tool_name = tool_call.get("name", "")
                     tool_args = tool_call.get("args", {})
@@ -186,10 +185,20 @@ class BaseAgent(ABC):
                     )
                     query_str = tool_args.get("query", "")
                     if query_str:
-                        await publish_agent_status(review_id, self.AGENT_NAME, "running", f"Searching codebase for '{query_str}'...")
+                        await publish_agent_status(
+                            review_id,
+                            self.AGENT_NAME.replace("_", " ").title(),
+                            "running",
+                            f"Searching codebase for '{query_str}'...",
+                        )
                     else:
-                        await publish_agent_status(review_id, self.AGENT_NAME, "running", f"Running tool {tool_name}...")
-                        
+                        await publish_agent_status(
+                            review_id,
+                            self.AGENT_NAME.replace("_", " ").title(),
+                            "running",
+                            f"Running tool {tool_name}...",
+                        )
+
                     # Find and call the matching tool
                     for t in tools:
                         if t.name == tool_name:
@@ -201,61 +210,53 @@ class BaseAgent(ABC):
             # Build enriched message with tool results, then get structured output
             enriched_human = human_message
             if tool_results:
-                enriched_human += "\n\n## Additional Context from Search\n" + "\n\n".join(tool_results)
-
-            import os
-            if os.environ.get("MOCK_LLM") == "1":
-                from backend.schemas.findings import CodeFinding, Severity, Recommendation
-                report = AgentReport(
-                    findings=[
-                        CodeFinding(
-                            title=f"Mock finding from {self.agent_name}",
-                            severity=Severity.HIGH,
-                            confidence=0.9,
-                            description="This is a mock finding generated because MOCK_LLM=1.",
-                            evidence="Mock evidence",
-                            file_path="src/main.py",
-                            line_number=42,
-                        )
-                    ],
-                    overall_assessment=f"Mock assessment from {self.agent_name}",
-                    recommendation=Recommendation.REQUEST_CHANGES,
-                    confidence=0.9,
+                enriched_human += (
+                    "\n\n## Additional Context from Search\n"
+                    + "\n\n".join(tool_results)
                 )
-            else:
-                from backend.schemas.findings import Recommendation
-                # Final call: get structured AgentReport
-                
-                await publish_agent_status(review_id, self.AGENT_NAME, "running", "Compiling final findings and recommendations...")
-                
-                report = None
-                current_messages = [
-                    SystemMessage(content=self.SYSTEM_PROMPT),
-                    HumanMessage(content=enriched_human),
-                ]
-                
-                for attempt in range(3):
-                    try:
-                        report = await llm.ainvoke(current_messages)
-                        if report is not None:
-                            break
-                        # If None, the parser failed silently
-                        current_messages.append(
-                            HumanMessage(content="You failed to output valid JSON matching the schema. Please output strictly valid JSON matching the exact schema with NO preamble text.")
+
+            from backend.schemas.findings import Recommendation
+            # Final call: get structured AgentReport
+
+            await publish_agent_status(
+                review_id,
+                self.AGENT_NAME.replace("_", " ").title(),
+                "running",
+                "Compiling final findings and recommendations...",
+            )
+
+            report = None
+            current_messages = [
+                SystemMessage(content=self.SYSTEM_PROMPT),
+                HumanMessage(content=enriched_human),
+            ]
+
+            for attempt in range(3):
+                try:
+                    report = await llm.ainvoke(current_messages)
+                    if report is not None:
+                        break
+                    # If None, the parser failed silently
+                    current_messages.append(
+                        HumanMessage(
+                            content="You failed to output valid JSON matching the schema. Please output strictly valid JSON matching the exact schema with NO preamble text."
                         )
-                    except Exception as parse_error:
-                        current_messages.append(
-                            HumanMessage(content=f"Your JSON output had a validation error: {str(parse_error)}. Please fix the syntax and output strictly valid JSON.")
-                        )
-                
-                if report is None:
-                    # Fallback if all 3 attempts fail
-                    report = AgentReport(
-                        findings=[],
-                        overall_assessment=f"JSON Parsing Failed after 3 attempts with {self.AGENT_NAME}. The LLM output could not be parsed.",
-                        recommendation=Recommendation.APPROVE_WITH_COMMENTS,
-                        confidence=0.0
                     )
+                except Exception as parse_error:
+                    current_messages.append(
+                        HumanMessage(
+                            content=f"Your JSON output had a validation error: {str(parse_error)}. Please fix the syntax and output strictly valid JSON."
+                        )
+                    )
+
+            if report is None:
+                # Fallback if all 3 attempts fail
+                report = AgentReport(
+                    findings=[],
+                    overall_assessment=f"JSON Parsing Failed after 3 attempts with {self.AGENT_NAME}. The LLM output could not be parsed.",
+                    recommendation=Recommendation.APPROVE_WITH_COMMENTS,
+                    confidence=0.0,
+                )
 
             elapsed = round(time.time() - start_time, 2)
             logger.info(

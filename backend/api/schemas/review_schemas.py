@@ -3,7 +3,7 @@ backend/api/schemas/review_schemas.py
 
 Pydantic models for HTTP request/response bodies.
 
-WHY SEPARATE SCHEMAS FROM DB MODELS?
+Design Note: Separate SCHEMAS FROM DB MODELS?
   DB models (SQLAlchemy) define how data is stored.
   API schemas (Pydantic) define what the HTTP API accepts/returns.
   These are NOT the same thing:
@@ -15,13 +15,14 @@ WHY SEPARATE SCHEMAS FROM DB MODELS?
   tight coupling (changing the DB schema breaks the API).
 """
 
-from pydantic import BaseModel, HttpUrl, field_validator
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
 from uuid import UUID
 
 
 # ── Request schemas (what clients send to us) ─────────────────────────────────
+
 
 class StartReviewRequest(BaseModel):
     """Request body for POST /reviews/start"""
@@ -43,8 +44,9 @@ class StartReviewRequest(BaseModel):
 
 class HumanDecisionRequest(BaseModel):
     """Request body for POST /reviews/{id}/decision"""
-    decision: str           # "approve" | "reject" | "approve_with_override"
-    reviewer: str           # Who is making the decision
+
+    decision: str  # "approve" | "reject" | "approve_with_override"
+    reviewer: str  # Who is making the decision
     comment: Optional[str] = None
 
     @field_validator("decision")
@@ -58,16 +60,19 @@ class HumanDecisionRequest(BaseModel):
 
 # ── Response schemas (what we return to clients) ──────────────────────────────
 
+
 class StartReviewResponse(BaseModel):
     """Response for POST /reviews/start"""
+
     review_id: UUID
-    status: str             # "queued"
-    message: str            # Human-readable message
-    status_url: str         # URL to poll for status
+    status: str  # "queued"
+    message: str  # Human-readable message
+    status_url: str  # URL to poll for status
 
 
 class ReviewStatusResponse(BaseModel):
     """Response for GET /reviews/{id}/status"""
+
     review_id: UUID
     status: str
     # Status progression:

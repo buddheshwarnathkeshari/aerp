@@ -14,7 +14,7 @@ HOW JWT REFRESH TOKENS WORK:
 
   3. On logout: set revoked_at = NOW() on the refresh token.
 
-WHY STORE THE HASH, NOT THE RAW TOKEN?
+Design Note: Store THE HASH, NOT THE RAW TOKEN?
   The raw refresh token is equivalent to a password — whoever has it
   can impersonate the user. If an attacker dumps the database,
   they would get all active sessions.
@@ -24,7 +24,7 @@ WHY STORE THE HASH, NOT THE RAW TOKEN?
   - Database has only the hash — useless to an attacker without the raw token
   - Same principle as password hashing
 
-WHY NOT STORE IN REDIS INSTEAD?
+Design Note: Not STORE IN REDIS INSTEAD?
   Redis is valid for short-lived access tokens. But for refresh tokens
   (30 days), PostgreSQL is better: ACID guarantees, survives restarts,
   proper audit trail of every session ever created.
@@ -94,6 +94,7 @@ class RefreshToken(Base, TimestampMixin):
     def is_valid(self) -> bool:
         """True if this token can be used to issue a new access token."""
         from datetime import timezone
+
         now = datetime.now(tz=timezone.utc)
         return self.revoked_at is None and self.expires_at > now
 

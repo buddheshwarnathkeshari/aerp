@@ -34,74 +34,39 @@ const ProfileDropdown = () => {
   };
 
   return (
-    <div style={{ position: 'relative' }} ref={dropdownRef}>
+    <div className="relative" ref={dropdownRef}>
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-center cursor-pointer transition hover-brighten" 
-        style={{ 
-          height: '40px', 
-          padding: user?.first_name ? '0 0.25rem 0 1rem' : '0',
-          width: user?.first_name ? 'auto' : '40px',
-          gap: '0.5rem', 
-          borderRadius: '2rem', 
-          background: 'var(--bg-tertiary)', 
-          color: 'var(--text-primary)', 
-          border: '1px solid rgba(255,255,255,0.1)' 
-        }}>
+        className={`flex items-center justify-center cursor-pointer transition hover-brighten profile-dropdown-btn ${user?.first_name ? 'profile-dropdown-btn-with-name' : 'profile-dropdown-btn-icon-only'}`} 
+      >
         {user?.first_name && (
-          <span style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--text-secondary)' }}>
+          <span className="profile-dropdown-name">
             {user.first_name}
           </span>
         )}
-        <div style={{ 
-          width: user?.first_name ? '32px' : '100%', 
-          height: user?.first_name ? '32px' : '100%', 
-          borderRadius: '50%', 
-          background: user?.first_name ? 'rgba(255,255,255,0.05)' : 'transparent', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center' 
-        }}>
+        <div className={`profile-dropdown-avatar ${user?.first_name ? 'profile-dropdown-avatar-with-name' : 'profile-dropdown-avatar-icon-only'}`}>
           <User size={user?.first_name ? 16 : 20} />
         </div>
       </button>
       
       {isOpen && (
-        <div className="animate-slide-up" style={{ 
-          position: 'absolute', 
-          top: '100%', 
-          right: 0, 
-          marginTop: '0.75rem',
-          minWidth: '240px',
-          padding: '0.5rem',
-          zIndex: 1000,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '4px',
-          backgroundColor: 'rgba(10, 15, 28, 0.95)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          border: '1px solid rgba(255,255,255,0.15)',
-          borderTop: '1px solid rgba(255,255,255,0.25)',
-          borderRadius: '12px',
-          boxShadow: '0 20px 40px -10px rgba(0, 0, 0, 0.8), 0 0 20px rgba(59, 130, 246, 0.1)'
-        }}>
-          <div style={{ padding: '0.75rem 0.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '8px' }}>
-            <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>{user?.first_name} {user?.last_name}</div>
-            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>{user?.email}</div>
+        <div className="animate-slide-up profile-dropdown-menu">
+          <div className="profile-dropdown-header">
+            <div className="profile-dropdown-header-name">{user?.first_name} {user?.last_name}</div>
+            <div className="profile-dropdown-header-email">{user?.email}</div>
           </div>
           
-          <Link to="/profile" onClick={() => setIsOpen(false)} className="dropdown-item flex items-center" style={{ padding: '0.5rem', borderRadius: '6px', color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.875rem', gap: '0.75rem' }}>
+          <Link to="/profile" onClick={() => setIsOpen(false)} className="dropdown-item flex items-center">
             <Settings size={16} /> Update Profile
           </Link>
-          <Link to="/profile/security" onClick={() => setIsOpen(false)} className="dropdown-item flex items-center" style={{ padding: '0.5rem', borderRadius: '6px', color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.875rem', gap: '0.75rem' }}>
+          <Link to="/profile/security" onClick={() => setIsOpen(false)} className="dropdown-item flex items-center">
             <Key size={16} /> Change Password
           </Link>
-          <Link to="/profile/connectors" onClick={() => setIsOpen(false)} className="dropdown-item flex items-center" style={{ padding: '0.5rem', borderRadius: '6px', color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.875rem', gap: '0.75rem' }}>
+          <Link to="/profile/connectors" onClick={() => setIsOpen(false)} className="dropdown-item flex items-center">
             <LinkIcon size={16} /> Manage Connectors
           </Link>
-          <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', margin: '4px 0' }} />
-          <button onClick={handleLogout} className="dropdown-item flex items-center" style={{ padding: '0.5rem', borderRadius: '6px', color: '#ef4444', textDecoration: 'none', fontSize: '0.875rem', background: 'transparent', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', gap: '0.75rem' }}>
+          <div className="dropdown-divider" />
+          <button onClick={handleLogout} className="dropdown-item dropdown-item-logout flex items-center">
             <LogOut size={16} /> Logout
           </button>
         </div>
@@ -113,7 +78,10 @@ const ProfileDropdown = () => {
 const HeaderNavigation = () => {
   const { user } = useAuth();
   const location = useLocation();
+  const isAuthPage = location.pathname === '/login' || location.pathname === '/register';
   
+  if (isAuthPage) return null;
+
   return (
     <nav className="flex items-center gap-4">
       {location.pathname !== '/' && (
