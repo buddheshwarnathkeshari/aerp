@@ -57,32 +57,24 @@ The magic of AERP lies in its specialized multi-agent architecture. Here is the 
 
 ## 📸 Gallery
 
-<details>
-<summary><b>Authentication (Login & Signup)</b></summary>
+### Authentication (Login & Signup)
 <br/>
 <img src="docs/assets/Login.png" width="400" alt="Login Page">
 <img src="docs/assets/Signup.png" width="400" alt="Signup Page">
-</details>
 
-<details>
-<summary><b>User Profile & Settings</b></summary>
+### User Profile & Settings
 <br/>
 <img src="docs/assets/ChangePassword.png" width="800" alt="Change Password">
-</details>
 
-<details>
-<summary><b>Connectors (GitHub & Jira)</b></summary>
+### Connectors (GitHub & Jira)
 <br/>
 <img src="docs/assets/Connectors.png" width="800" alt="Integrations & Connectors Page">
-</details>
 
-<details>
-<summary><b>Review Workflow & Human-in-the-Loop</b></summary>
+### Review Workflow & Human-in-the-Loop
 <br/>
 <img src="docs/assets/StartCodeReview.png" width="800" alt="Start Review Page">
 <img src="docs/assets/Reviewing.png" width="800" alt="Review Dashboard">
 <img src="docs/assets/HumanInTheLoop.png" width="800" alt="Human In The Loop Approval">
-</details>
 
 ## 🏃‍♂️ Running Locally
 
