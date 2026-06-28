@@ -1,0 +1,130 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml
+#
+# WHAT IS DOCKER COMPOSE?
+# It lets you define and run multiple containers with a single command.
+# Instead of manually starting Postgres, Redis, and FastAPI separately,
+# `docker compose up` starts everything together and wires them up.
+#
+# SERVICES WE RUN:
+#   postgres  → Our database (PostgreSQL + pgvector extension)
+#   redis     → Cache + message broker (for Celery + LangGraph checkpoints)
+#   api       → FastAPI application
+#   worker    → Celery worker (runs LangGraph workflows in background)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL with pgvector extension ────────────────────────────────────
+  # Design Note: pgvector image instead of plain postgres?
+  # The pgvector/pgvector image pre-installs the pgvector extension.
+  # Plain postgres requires manual extension installation steps.
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aerp_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"           # host:container — lets you connect from your machine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data    # data survives container restarts
+      # init.sql removed — schema is now managed by Alembic migrations
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  # Used for TWO separate purposes:
+  #   1. Celery broker — stores the task queue (which workflows to run)
+  #   2. LangGraph checkpointer — stores paused workflow state (HITL save-game)
+  # They use different Redis key prefixes so they don't interfere.
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: aerp_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Application ────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aerp_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    # env_file loads all variables from .env into the container.
+    # DRYer than listing each variable explicitly — adding a new
+    # env var only requires changing .env, not both service definitions.
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend    # live reload in development
+      - ./credentials:/app/credentials
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Run Alembic migrations THEN start the server.
+    # Design Note: here and not in a separate container?
+    #   Migrations must run after postgres is healthy (depends_on handles this).
+    #   Running in the API container ensures migrations complete before traffic.
+    command: sh -c "uv run python -m alembic upgrade head && uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  # ── Celery Worker ──────────────────────────────────────────────────────────
+  # Design Note: A SEPARATE WORKER CONTAINER?
+  # The FastAPI server handles HTTP requests (fast, < 100ms).
+  # LangGraph workflows take 5-10 minutes.
+  # You cannot run a 10-minute task inside a web request.
+  # The worker runs independently, picking tasks from the Redis queue.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aerp_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend
+      - ./credentials:/app/credentials
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "uv run celery -A backend.tasks.celery_app worker --loglevel=info --concurrency=2"
+
+  # ── React Frontend ─────────────────────────────────────────────────────────
+  frontend:
+    image: node:20-alpine
+    container_name: aerp_frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "5173:5173"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    command: npm run dev -- --host
+
+# ── Named Volumes ─────────────────────────────────────────────────────────────
+# Named volumes persist data outside containers.
+# Even if you delete and recreate containers, your data survives.
+volumes:
+  postgres_data:
+  redis_data:
